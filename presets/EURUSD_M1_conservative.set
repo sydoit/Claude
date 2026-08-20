@@ -1,0 +1,78 @@
+; TrendScalper - EURUSD M1, conservative starting point
+; Load it from the EA inputs dialog or the Strategy Tester: Load.
+; All times are broker server time - check the windows against your broker.
+; 
+; Enum inputs are stored as integers:
+;   InpLogLevel      0=off 1=error 2=warn 3=info 4=debug
+;   InpEntryMode     0=pullback 1=breakout 2=either
+;   InpTiming        0=every tick 1=new bar
+;   InpLotMode       0=fixed 1=risk percent
+;   InpTrailMode     0=none 1=ATR 2=fast EMA
+;   Timeframes       1=M1 5=M5 15=M15 30=M30 16385=H1 16388=H4
+InpMagic=770101
+InpComment=TrendScalper
+InpLogLevel=3
+InpTesterVerbose=false
+InpShowDashboard=true
+InpCloseOnDeinit=false
+InpEntryTF=1
+InpTrendTF=15
+InpUseHtfFilter=true
+InpEmaFast=12
+InpEmaSlow=34
+InpEmaSlopeLookback=3
+InpHtfEmaFast=20
+InpHtfEmaSlow=50
+InpAtrPeriod=14
+InpAdxPeriod=14
+InpAdxMin=22.0
+InpRsiPeriod=14
+InpRsiBuyMin=45.0
+InpRsiBuyMax=78.0
+InpRsiSellMin=22.0
+InpRsiSellMax=55.0
+InpEntryMode=2
+InpTiming=0
+InpBreakoutLookback=8
+InpBreakoutBufferAtr=0.05
+InpPullbackDepthAtr=0.35
+InpLotMode=1
+InpFixedLots=0.01
+InpRiskPercent=0.20
+InpMaxLots=0.05
+InpMaxTotalLots=0.20
+InpStopLossAtr=1.20
+InpUseTakeProfit=true
+InpTakeProfitAtr=1.80
+InpBreakEvenAtr=0.80
+InpBreakEvenOffsetPts=5.0
+InpTrailMode=1
+InpTrailAtr=1.00
+InpTrailStartAtr=1.00
+InpPartialClosePct=50.0
+InpPartialTriggerAtr=1.00
+InpMaxHoldSeconds=3600
+InpExitOnFlip=true
+InpMaxPositions=3
+InpAddStepAtr=0.75
+InpAddOnlyInProfit=true
+InpCooldownSeconds=20
+InpMaxSpreadPoints=12.0
+InpMaxSpreadAtr=0.25
+InpDailyLossPercent=1.5
+InpDailyProfitPercent=3.0
+InpMaxDrawdownPercent=10.0
+InpMaxConsecLosses=4
+InpMaxTradesPerDay=30
+InpMinFreeMarginPct=30.0
+InpFlattenOnHalt=true
+InpMaxSlippagePoints=10
+InpOrderRetries=3
+InpSessions=07:00-11:00,13:00-17:00
+InpBlackout=
+InpTradeMonday=true
+InpTradeTuesday=true
+InpTradeWednesday=true
+InpTradeThursday=true
+InpTradeFriday=true
+InpFridayCloseHour=20

@@ -1,0 +1,8 @@
+# MetaTrader compiled binaries and build output
+*.ex5
+*.ex4
+*.log
+
+# MetaEditor / terminal artefacts
+MQL5/Logs/
+*.bak
