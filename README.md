@@ -85,14 +85,26 @@ list from then on. You can also just browse to wherever you cloned this repo.
 2. Pick **TrendScalper** as the Expert, then set Symbol, Period and the date
    range. For `NVDA_M5_shares.set`, set Period to **M5** and Modelling to
    *Every tick based on real ticks*.
-3. Open the **Inputs** tab, click **Load** at the bottom, choose the `.set`.
+3. Open the **Inputs** tab and load the `.set`. Where that control lives
+   depends on your build: older testers have **Load** / **Save** buttons under
+   the parameter grid; newer ones moved it to the **right-click context menu**
+   inside the grid. If neither appears, copy the `.set` into `MQL5/Presets`
+   first — some builds only list presets already in that folder.
 4. Check the values populated, then **Start**.
 
-**On a live or demo chart:**
+**On a live or demo chart** — the properties dialog has kept its Load/Save
+buttons more consistently than the tester has:
 
 1. Drag **TrendScalper** onto the chart of the symbol you want to trade.
 2. In the dialog that opens, go to the **Inputs** tab and click **Load**.
 3. Choose the `.set`, then **OK**.
+
+**If you cannot find the control at all**, type the values in by hand — click a
+**Value** cell in the grid and edit it. A `.set` is plain text, so you can read
+the values straight out of it, and only a handful differ from the defaults.
+For `NVDA_M5_shares.set` just three of them decide whether the EA trades at
+all: `InpSessions` (clear it to blank), `InpMaxLots` = `0` and
+`InpMaxTotalLots` = `0`. The rest are tuning.
 
 To keep your own tuning, click **Save** on that same Inputs tab and write a new
 `.set` — don't edit the repo ones in place, so you can always diff against the
