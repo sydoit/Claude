@@ -73,6 +73,38 @@ broker, symbol and spread.** See [Before you go live](#before-you-go-live).
 Requires MetaTrader 5 (build 2085 or newer). MT4 is not supported — the code
 uses the MQL5 position model and `CTrade`.
 
+## Loading a preset
+
+MT5's Load dialog opens in `MQL5/Presets` by default, so copy the `.set` files
+there once (**File → Open Data Folder → MQL5 → Presets**) and they appear in the
+list from then on. You can also just browse to wherever you cloned this repo.
+
+**In the Strategy Tester** — this is the one you want for a backtest:
+
+1. **View → Strategy Tester** (Ctrl+R).
+2. Pick **TrendScalper** as the Expert, then set Symbol, Period and the date
+   range. For `NVDA_M5_shares.set`, set Period to **M5** and Modelling to
+   *Every tick based on real ticks*.
+3. Open the **Inputs** tab, click **Load** at the bottom, choose the `.set`.
+4. Check the values populated, then **Start**.
+
+**On a live or demo chart:**
+
+1. Drag **TrendScalper** onto the chart of the symbol you want to trade.
+2. In the dialog that opens, go to the **Inputs** tab and click **Load**.
+3. Choose the `.set`, then **OK**.
+
+To keep your own tuning, click **Save** on that same Inputs tab and write a new
+`.set` — don't edit the repo ones in place, so you can always diff against the
+starting point.
+
+Two things a `.set` file does *not* carry, because MT5 does not store them
+there: the **symbol** and the **timeframe/date range**. Those are tester or
+chart settings and must be set separately — a preset named for NVDA will
+happily load onto a EURUSD chart. Note also that `InpEntryTF` and `InpTrendTF`
+inside the preset control which timeframes the *signals* use, independently of
+the chart or tester period.
+
 ## Key inputs
 
 Everything has a default that works; these are the ones worth thinking about.
