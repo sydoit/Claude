@@ -18,7 +18,7 @@
 //+------------------------------------------------------------------+
 #property copyright "TrendScalper"
 #property link      "https://github.com/sydoit/Claude"
-#property version   "1.02"
+#property version   "1.03"
 #property description "Trend-following micro-scalper: small clips, ATR risk control, session and drawdown guards."
 
 #include <TrendScalper/Logger.mqh>
@@ -299,7 +299,7 @@ void ReportSizingCheck(const double atr)
 void ReportEnvironment(void)
   {
    Log.Report("===============================================================");
-   Log.Report("TrendScalper build 1.02 (diagnostics enabled)");
+   Log.Report("TrendScalper build 1.03 (diagnostics enabled)");
    Log.Report(StringFormat("TrendScalper on %s  entry %s  trend %s",
                            _Symbol,TsTimeframeName(g_cfg.entry_tf),
                            g_cfg.use_htf_filter ? TsTimeframeName(g_cfg.trend_tf) : "off"));
@@ -388,6 +388,8 @@ void OnTick(void)
   {
    if(!g_ready)
       return;
+
+   Diag.Tick(TimeCurrent());
 
    g_risk.Refresh();
    g_exec.RefreshBook();
@@ -488,12 +490,17 @@ void OnTick(void)
               }
 
    //--- Sample the blocking reason once per bar, so the tally reads as a
-   //--- share of bars rather than of ticks.
-   if(sig.bar_time!=g_last_diag_bar)
-     {
-      g_last_diag_bar=sig.bar_time;
-      Diag.Gate(tag=="" ? "reached the entry check" : tag);
-     }
+   //--- share of bars rather than of ticks. With no usable data there is
+   //--- no bar to key on, so those ticks are counted separately - that
+   //--- distinction is what tells a history problem from a quiet market.
+   if(!sig.ready)
+      Diag.Warmup(sig.tag);
+   else
+      if(sig.bar_time!=g_last_diag_bar)
+        {
+         g_last_diag_bar=sig.bar_time;
+         Diag.Gate(tag=="" ? "reached the entry check" : tag);
+        }
 
    SRiskState risk_now=g_risk.State();
    SBook      book_now=g_exec.Book();

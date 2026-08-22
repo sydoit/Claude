@@ -60,8 +60,11 @@ private:
    double            m_htf_slow[];
    MqlRates          m_rates[];
 
-   bool              Pull(void);
-   bool              HandleReady(const int handle,const ENUM_TIMEFRAMES tf) const;
+   bool              Pull(string &why,string &tag);
+   bool              HandleReady(const int handle,const ENUM_TIMEFRAMES tf,
+                                 const string name,string &why,string &tag) const;
+   bool              Take(const int handle,const int buffer,const int count,double &dst[],
+                          const string name,string &why,string &tag) const;
    int               EvaluateBias(void) const;
    int               EvaluateTrend(void) const;
    bool              RsiAllows(const int dir) const;
@@ -144,13 +147,31 @@ void CSignalEngine::Release(void)
   }
 
 //+------------------------------------------------------------------+
-bool CSignalEngine::HandleReady(const int handle,const ENUM_TIMEFRAMES tf) const
+bool CSignalEngine::HandleReady(const int handle,const ENUM_TIMEFRAMES tf,
+                                const string name,string &why,string &tag) const
   {
    int calculated=BarsCalculated(handle);
    if(calculated<m_depth)
      {
-      Log.Debug(StringFormat("Indicator warming up on %s (%d/%d bars)",
-                             TsTimeframeName(tf),calculated,m_depth));
+      why=StringFormat("%s on %s has %d of the %d bars it needs",
+                       name,TsTimeframeName(tf),calculated,m_depth);
+      tag="no data: "+name;
+      return(false);
+     }
+   return(true);
+  }
+
+//+------------------------------------------------------------------+
+//| One buffer copy that says which series came up short.            |
+//+------------------------------------------------------------------+
+bool CSignalEngine::Take(const int handle,const int buffer,const int count,double &dst[],
+                         const string name,string &why,string &tag) const
+  {
+   int got=CopyBuffer(handle,buffer,0,count,dst);
+   if(got<count)
+     {
+      why=StringFormat("%s returned %d of %d bars (error %d)",name,got,count,GetLastError());
+      tag="short read: "+name;
       return(false);
      }
    return(true);
@@ -160,31 +181,36 @@ bool CSignalEngine::HandleReady(const int handle,const ENUM_TIMEFRAMES tf) const
 //| Copies the working window of every series. Any short read means  |
 //| history is still loading, so the caller stands aside this tick.  |
 //+------------------------------------------------------------------+
-bool CSignalEngine::Pull(void)
+bool CSignalEngine::Pull(string &why,string &tag)
   {
-   if(!HandleReady(m_h_ema_fast,m_cfg.entry_tf) ||
-      !HandleReady(m_h_ema_slow,m_cfg.entry_tf) ||
-      !HandleReady(m_h_atr,m_cfg.entry_tf)      ||
-      !HandleReady(m_h_adx,m_cfg.entry_tf)      ||
-      !HandleReady(m_h_rsi,m_cfg.entry_tf))
-      return(false);
+   if(!HandleReady(m_h_ema_fast,m_cfg.entry_tf,"fast EMA",why,tag)) return(false);
+   if(!HandleReady(m_h_ema_slow,m_cfg.entry_tf,"slow EMA",why,tag)) return(false);
+   if(!HandleReady(m_h_atr,m_cfg.entry_tf,"ATR",why,tag))           return(false);
+   if(!HandleReady(m_h_adx,m_cfg.entry_tf,"ADX",why,tag))           return(false);
+   if(!HandleReady(m_h_rsi,m_cfg.entry_tf,"RSI",why,tag))           return(false);
 
-   if(CopyBuffer(m_h_ema_fast,0,0,m_depth,m_ema_fast)<m_depth) return(false);
-   if(CopyBuffer(m_h_ema_slow,0,0,m_depth,m_ema_slow)<m_depth) return(false);
-   if(CopyBuffer(m_h_atr,0,0,m_depth,m_atr)<m_depth)           return(false);
-   if(CopyBuffer(m_h_adx,MAIN_LINE,0,m_depth,m_adx)<m_depth)   return(false);
-   if(CopyBuffer(m_h_rsi,0,0,m_depth,m_rsi)<m_depth)           return(false);
+   if(!Take(m_h_ema_fast,0,m_depth,m_ema_fast,"fast EMA",why,tag))  return(false);
+   if(!Take(m_h_ema_slow,0,m_depth,m_ema_slow,"slow EMA",why,tag))  return(false);
+   if(!Take(m_h_atr,0,m_depth,m_atr,"ATR",why,tag))                 return(false);
+   if(!Take(m_h_adx,MAIN_LINE,m_depth,m_adx,"ADX",why,tag))         return(false);
+   if(!Take(m_h_rsi,0,m_depth,m_rsi,"RSI",why,tag))                 return(false);
 
    if(m_cfg.use_htf_filter)
      {
-      if(!HandleReady(m_h_htf_fast,m_cfg.trend_tf) || !HandleReady(m_h_htf_slow,m_cfg.trend_tf))
-         return(false);
-      if(CopyBuffer(m_h_htf_fast,0,0,3,m_htf_fast)<3) return(false);
-      if(CopyBuffer(m_h_htf_slow,0,0,3,m_htf_slow)<3) return(false);
+      if(!HandleReady(m_h_htf_fast,m_cfg.trend_tf,"trend fast EMA",why,tag)) return(false);
+      if(!HandleReady(m_h_htf_slow,m_cfg.trend_tf,"trend slow EMA",why,tag)) return(false);
+      if(!Take(m_h_htf_fast,0,3,m_htf_fast,"trend fast EMA",why,tag))        return(false);
+      if(!Take(m_h_htf_slow,0,3,m_htf_slow,"trend slow EMA",why,tag))        return(false);
      }
 
-   if(CopyRates(m_sym.symbol,m_cfg.entry_tf,0,m_depth,m_rates)<m_depth)
+   int bars=CopyRates(m_sym.symbol,m_cfg.entry_tf,0,m_depth,m_rates);
+   if(bars<m_depth)
+     {
+      why=StringFormat("price history for %s %s returned %d of %d bars (error %d)",
+                       m_sym.symbol,TsTimeframeName(m_cfg.entry_tf),bars,m_depth,GetLastError());
+      tag="no data: price history";
       return(false);
+     }
 
    return(true);
   }
@@ -356,10 +382,12 @@ bool CSignalEngine::Evaluate(SSignal &out)
    out.tag="";
    out.ready=false;
 
-   if(!Pull())
+   string pull_why="";
+   string pull_tag="";
+   if(!Pull(pull_why,pull_tag))
      {
-      out.reason="warming up";
-      out.tag="indicator warm-up / no history";
+      out.reason=pull_why;
+      out.tag=pull_tag;
       return(false);
      }
 

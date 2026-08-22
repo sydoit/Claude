@@ -22,6 +22,10 @@ private:
    long              m_hits[];
    long              m_samples;     // gate samples (one per bar)
    long              m_attempts;    // entry attempts
+   long              m_ticks;       // every OnTick, ready or not
+   long              m_warmup;      // ticks where indicator data was unusable
+   datetime          m_first_tick;
+   datetime          m_last_tick;
 
    int               Find(const string tag) const
      {
@@ -33,7 +37,8 @@ private:
      }
 
 public:
-                     CDiag(void): m_samples(0),m_attempts(0) {}
+                     CDiag(void): m_samples(0),m_attempts(0),m_ticks(0),m_warmup(0),
+                                  m_first_tick(0),m_last_tick(0) {}
 
    void              Reset(void)
      {
@@ -41,6 +46,29 @@ public:
       ArrayResize(m_hits,0);
       m_samples=0;
       m_attempts=0;
+      m_ticks=0;
+      m_warmup=0;
+      m_first_tick=0;
+      m_last_tick=0;
+     }
+
+   //--- Called on every tick, before anything can reject it. A zero here
+   //--- means OnTick never ran at all, which is a completely different
+   //--- problem from the EA running and finding nothing to trade.
+   void              Tick(const datetime when)
+     {
+      m_ticks++;
+      if(m_first_tick==0)
+         m_first_tick=when;
+      m_last_tick=when;
+     }
+
+   //--- Indicator data was not usable this tick. Counted per tick, not
+   //--- per bar: with no usable data there is no bar to key on.
+   void              Warmup(const string tag)
+     {
+      m_warmup++;
+      Add(tag=="" ? "no data: unknown" : tag);
      }
 
    //--- One sample per bar: why entries were not being considered.
@@ -200,15 +228,50 @@ public:
          Emit(out,"");
         }
 
-      if(n==0 || m_samples==0)
+      Emit(out,StringFormat("Ticks received: %I64d   (%s -> %s)",m_ticks,
+                            m_first_tick==0 ? "never" : TimeToString(m_first_tick,TIME_DATE|TIME_MINUTES),
+                            m_last_tick==0  ? "never" : TimeToString(m_last_tick,TIME_DATE|TIME_MINUTES)));
+      Emit(out,StringFormat("Ticks with unusable indicator data: %I64d",m_warmup));
+      Emit(out,"");
+
+      //--- Case 1: OnTick never ran. Nothing about the strategy is at fault.
+      if(m_ticks==0)
         {
-         Emit(out,"VERDICT: no bars were evaluated at all.");
+         Emit(out,"VERDICT: the EA never received a single tick.");
          Emit(out,"");
-         Emit(out,"The EA never received usable indicator data, so it never reached");
-         Emit(out,"the entry rules. Check, in this order:");
-         Emit(out,"  1. History exists for the tested range on the ENTRY timeframe.");
-         Emit(out,"  2. History exists on the TREND timeframe too (InpTrendTF).");
-         Emit(out,"  3. The tested date range actually contains bars for this symbol.");
+         Emit(out,"OnTick was never called, so no rule of the strategy ever ran. This");
+         Emit(out,"is an environment problem, not a settings problem:");
+         Emit(out,"  - In the tester: the chosen date range produced no ticks. Check the");
+         Emit(out,"    dates, and that this symbol has history there (View > Symbols >");
+         Emit(out,"    the symbol > Bars/Ticks, then Request/Download).");
+         Emit(out,"  - On a chart: the market was closed for the whole session, or the");
+         Emit(out,"    terminal was not connected.");
+         Emit(out,"===============================================================");
+         for(int i=0;i<ArraySize(out);i++)
+            Log.Report(out[i]);
+         WriteToFile(out);
+         return;
+        }
+
+      //--- Case 2: ticks arrived but indicator data never became usable.
+      if(m_samples==0)
+        {
+         Emit(out,StringFormat("VERDICT: %I64d ticks arrived, but indicator data was never usable.",m_ticks));
+         Emit(out,"");
+         Emit(out,"The EA ran, so this is a history problem on one specific series.");
+         Emit(out,"The rows below name it - 'no data: X' means X never had enough bars,");
+         Emit(out,"'short read: X' means the copy came back incomplete.");
+         Emit(out,"");
+         Emit(out,"Most often this is the TREND timeframe (InpTrendTF): the tester loads");
+         Emit(out,"the entry timeframe automatically but not always the higher one.");
+         Emit(out,"Open a chart of that timeframe once to force the download, or set");
+         Emit(out,"InpUseHtfFilter to false to take that dependency out entirely.");
+         Emit(out,"");
+        }
+
+      if(n==0)
+        {
+         Emit(out,"No reasons were recorded at all.");
          Emit(out,"===============================================================");
          for(int i=0;i<ArraySize(out);i++)
             Log.Report(out[i]);
@@ -232,23 +295,25 @@ public:
 
       //--- the verdict: name the top blocker and what to do about it
       int    top=order[0];
-      double top_share=(double)m_hits[top]/(double)m_samples*100.0;
+      double top_share=(m_samples>0) ? (double)m_hits[top]/(double)m_samples*100.0 : 0.0;
 
       if(m_attempts>0)
          Emit(out,StringFormat("VERDICT: %I64d entry attempts were made.",m_attempts));
       else
-        {
-         Emit(out,"VERDICT: no entry was ever attempted.");
-         Emit(out,"");
-         Emit(out,StringFormat("The gate that blocked the most bars (%.1f%% of them) was:",top_share));
-         Emit(out,"  "+m_tag[top]);
-         string fix=Remedy(m_tag[top]);
-         if(fix!="")
+         if(m_samples>0)
            {
+            Emit(out,"VERDICT: no entry was ever attempted.");
+         Emit(out,"");
             Emit(out,"");
-            Emit(out,"  "+fix);
+            Emit(out,StringFormat("The gate that blocked the most bars (%.1f%% of them) was:",top_share));
+            Emit(out,"  "+m_tag[top]);
+            string fix=Remedy(m_tag[top]);
+            if(fix!="")
+              {
+               Emit(out,"");
+               Emit(out,"  "+fix);
+              }
            }
-        }
 
       Emit(out,"");
       Emit(out,StringFormat("%I64d bars evaluated, %I64d entry attempts",m_samples,m_attempts));
@@ -258,7 +323,8 @@ public:
       for(int i=0;i<n;i++)
         {
          int k=order[i];
-         double share=(double)m_hits[k]/(double)m_samples*100.0;
+         long   basis=(m_samples>0) ? m_samples : m_ticks;
+         double share=(basis>0) ? (double)m_hits[k]/(double)basis*100.0 : 0.0;
          Emit(out,StringFormat("%-40s %8I64d  %6.2f%%",m_tag[k],m_hits[k],share));
         }
 
