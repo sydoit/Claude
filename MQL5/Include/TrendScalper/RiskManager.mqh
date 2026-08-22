@@ -56,9 +56,9 @@ public:
    void              Refresh(void);                       // call once per tick
    void              OnPositionClosed(void) { m_last_scan=0; }
 
-   bool              TradingAllowed(string &reason);
+   bool              TradingAllowed(string &reason,string &tag);
    double            CalcLots(const int dir,const double entry,const double stop,
-                              const double existing_volume,string &reason);
+                              const double existing_volume,string &reason,string &tag);
 
    SRiskState        State(void) const { return(m_state); }
    bool              IsHalted(void) const { return(m_state.halted); }
@@ -179,28 +179,32 @@ void CRiskManager::Refresh(void)
 //| Every breaker that can stop new entries. Open positions are      |
 //| still managed normally when this returns false.                  |
 //+------------------------------------------------------------------+
-bool CRiskManager::TradingAllowed(string &reason)
+bool CRiskManager::TradingAllowed(string &reason,string &tag)
   {
    if(m_state.halted)
      {
       reason=m_state.halt_reason;
+      tag="breaker latched for today";
       return(false);
      }
 
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
      {
       reason="algo trading disabled in the terminal";
+      tag="algo trading disabled";
       return(false);
      }
    if(!AccountInfoInteger(ACCOUNT_TRADE_EXPERT) || !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
      {
       reason="trading not permitted on this account";
+      tag="account cannot trade";
       return(false);
      }
    long trade_mode=SymbolInfoInteger(m_sym.symbol,SYMBOL_TRADE_MODE);
    if(trade_mode==SYMBOL_TRADE_MODE_DISABLED || trade_mode==SYMBOL_TRADE_MODE_CLOSEONLY)
      {
       reason="symbol is closed for new positions";
+      tag="symbol closed for new positions";
       return(false);
      }
 
@@ -210,6 +214,7 @@ bool CRiskManager::TradingAllowed(string &reason)
       m_state.halt_reason=StringFormat("daily loss limit hit (%.2f%%)",m_state.daily_pl_percent);
       Log.Warn("Halting new entries for today: "+m_state.halt_reason);
       reason=m_state.halt_reason;
+      tag="daily loss limit";
       return(false);
      }
    if(m_cfg.daily_profit_percent>0.0 && m_state.daily_pl_percent>=m_cfg.daily_profit_percent)
@@ -218,6 +223,7 @@ bool CRiskManager::TradingAllowed(string &reason)
       m_state.halt_reason=StringFormat("daily profit target reached (%.2f%%)",m_state.daily_pl_percent);
       Log.Info("Halting new entries for today: "+m_state.halt_reason);
       reason=m_state.halt_reason;
+      tag="daily profit target";
       return(false);
      }
    if(m_cfg.max_drawdown_percent>0.0 && m_state.drawdown_percent>=m_cfg.max_drawdown_percent)
@@ -227,16 +233,19 @@ bool CRiskManager::TradingAllowed(string &reason)
                                        m_state.drawdown_percent,m_cfg.max_drawdown_percent);
       Log.Warn("Halting new entries: "+m_state.halt_reason);
       reason=m_state.halt_reason;
+      tag="equity drawdown limit";
       return(false);
      }
    if(m_cfg.max_consecutive_losses>0 && m_state.consecutive_losses>=m_cfg.max_consecutive_losses)
      {
       reason=StringFormat("%d consecutive losses",m_state.consecutive_losses);
+      tag="consecutive-loss pause";
       return(false);
      }
    if(m_cfg.max_trades_per_day>0 && m_state.trades_today>=m_cfg.max_trades_per_day)
      {
       reason=StringFormat("daily trade cap reached (%d)",m_state.trades_today);
+      tag="daily trade cap";
       return(false);
      }
 
@@ -247,10 +256,12 @@ bool CRiskManager::TradingAllowed(string &reason)
      {
       reason=StringFormat("free margin %.1f%% below the %.1f%% floor",
                           free_margin/equity*100.0,m_cfg.min_free_margin_percent);
+      tag="free margin floor";
       return(false);
      }
 
    reason="";
+   tag="";
    return(true);
   }
 
@@ -278,9 +289,10 @@ double CRiskManager::LossPerLot(const int dir,const double entry,const double st
 //| cannot be sized safely.                                          |
 //+------------------------------------------------------------------+
 double CRiskManager::CalcLots(const int dir,const double entry,const double stop,
-                              const double existing_volume,string &reason)
+                              const double existing_volume,string &reason,string &tag)
   {
    reason="";
+   tag="";
 
    double lots=0.0;
 
@@ -295,6 +307,7 @@ double CRiskManager::CalcLots(const int dir,const double entry,const double stop
       if(per_lot<=0.0)
         {
          reason="cannot value the stop distance for this symbol";
+         tag="stop cannot be priced";
          return(0.0);
         }
       lots=budget/per_lot;
@@ -310,6 +323,7 @@ double CRiskManager::CalcLots(const int dir,const double entry,const double stop
       if(headroom<=0.0)
         {
          reason=StringFormat("total exposure cap reached (%s lots open)",m_sym.LotsToString(existing_volume));
+         tag="InpMaxTotalLots reached";
          return(0.0);
         }
       lots=MathMin(lots,headroom);
@@ -319,8 +333,10 @@ double CRiskManager::CalcLots(const int dir,const double entry,const double stop
 
    if(!m_sym.LotsTradable(lots))
      {
-      reason=StringFormat("sized volume %s is below the %s minimum - risk budget too small for this stop",
+      reason=StringFormat("sized volume %s is below the %s minimum - "
+                          "raise InpRiskPercent/InpMaxLots or trade a smaller-priced symbol",
                           m_sym.LotsToString(lots),m_sym.LotsToString(m_sym.vol_min));
+      tag="sized volume below broker minimum";
       return(0.0);
      }
 
@@ -333,6 +349,7 @@ double CRiskManager::CalcLots(const int dir,const double entry,const double stop
       if(margin>free_margin)
         {
          reason=StringFormat("margin %.2f exceeds free margin %.2f",margin,free_margin);
+         tag="insufficient free margin";
          return(0.0);
         }
      }

@@ -129,6 +129,24 @@ so a restart does not reset them.
 Open positions keep being managed while a breaker is active. With
 `InpFlattenOnHalt` they are closed as well.
 
+## Non-forex symbols
+
+The defaults are forex-shaped in two ways that matter enough to break a
+backtest silently:
+
+* **`InpSessions` is broker server time.** On an exchange-hours symbol the
+  broker's own session table already restricts trading, so `InpSessions = ""`
+  is usually correct. Start-up prints the overlap between your windows and the
+  broker's sessions, per weekday; a zero there means no trade can ever happen.
+* **`InpMaxLots` / `InpMaxTotalLots` are in the symbol's own volume units.** A
+  share CFD is typically quoted in shares with a minimum and step of 1, so a
+  cap of 0.10 rounds down to zero on every tick. Use `0` (no cap) on those
+  symbols and let `InpRiskPercent` size the trade. An impossible cap is raised
+  to the broker minimum at start-up with a message.
+
+`InpFridayCloseHour` has the same server-time caveat: a value tuned for the
+forex week lands mid-session on a US stock.
+
 ## Tuning notes
 
 * **Symbol first, parameters second.** The strategy needs the spread to be

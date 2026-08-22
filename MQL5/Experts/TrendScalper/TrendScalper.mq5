@@ -29,6 +29,7 @@
 #include <TrendScalper/TradeExecutor.mqh>
 #include <TrendScalper/Filters.mqh>
 #include <TrendScalper/Dashboard.mqh>
+#include <TrendScalper/Diagnostics.mqh>
 
 //--- General -------------------------------------------------------
 input group "General"
@@ -130,6 +131,8 @@ CTradeExecutor  g_exec;
 CFilters        g_filters;
 CDashboard      g_panel;
 datetime        g_last_eval_bar=0;
+datetime        g_last_diag_bar=0;
+bool            g_sizing_reported=false;
 bool            g_ready=false;
 
 //+------------------------------------------------------------------+
@@ -209,6 +212,110 @@ void BuildSettings(void)
   }
 
 //+------------------------------------------------------------------+
+//| The volume caps are written in lots, which only means the same    |
+//| thing across forex pairs. On a share CFD the broker may quote a   |
+//| minimum of 1 with a step of 1, and a 0.10 cap then floors to zero |
+//| on every single tick - the EA would simply never trade and never  |
+//| say why. Raise an impossible cap to the smallest tradable size    |
+//| and say so loudly. The risk budget is untouched: CalcLots still   |
+//| refuses any volume whose stop costs more than InpRiskPercent.     |
+//+------------------------------------------------------------------+
+void AdaptVolumeCapsToSymbol(void)
+  {
+   double vmin=g_symbol.vol_min;
+
+   if(g_cfg.max_lots>0.0 && g_cfg.max_lots<vmin)
+     {
+      Log.Report(StringFormat("InpMaxLots (%s) is below this symbol's minimum volume (%s) - "
+                              "raised to the minimum, or no order could ever be sized.",
+                              g_symbol.LotsToString(g_cfg.max_lots),g_symbol.LotsToString(vmin)));
+      g_cfg.max_lots=vmin;
+     }
+
+   if(g_cfg.max_total_lots>0.0 && g_cfg.max_total_lots<vmin)
+     {
+      Log.Report(StringFormat("InpMaxTotalLots (%s) is below this symbol's minimum volume (%s) - "
+                              "raised to the minimum.",
+                              g_symbol.LotsToString(g_cfg.max_total_lots),g_symbol.LotsToString(vmin)));
+      g_cfg.max_total_lots=vmin;
+     }
+
+   if(g_cfg.lot_mode==TS_LOT_FIXED && g_cfg.fixed_lots<vmin)
+     {
+      Log.Report(StringFormat("InpFixedLots (%s) is below this symbol's minimum volume (%s) - "
+                              "raised to the minimum.",
+                              g_symbol.LotsToString(g_cfg.fixed_lots),g_symbol.LotsToString(vmin)));
+      g_cfg.fixed_lots=vmin;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Can the configured risk actually buy one minimum lot at this stop |
+//| distance, and is the spread small enough to leave an edge? Both   |
+//| need a real ATR, so this is printed again on the first tick that  |
+//| has one - in the tester OnInit runs before any price exists.      |
+//+------------------------------------------------------------------+
+void ReportSizingCheck(const double atr)
+  {
+   if(atr<=0.0)
+      return;
+
+   double spread=g_symbol.Spread();
+
+   Log.Report(StringFormat("ATR(%d) on %s: %s   spread %s = %.0f%% of ATR (ceiling %.0f%%)",
+                           g_cfg.atr_period,TsTimeframeName(g_cfg.entry_tf),
+                           g_symbol.PriceToString(atr),g_symbol.PriceToString(spread),
+                           spread/atr*100.0,g_cfg.max_spread_atr*100.0));
+
+   if(g_cfg.max_spread_atr>0.0 && spread>atr*g_cfg.max_spread_atr)
+      Log.Report("*** The spread already exceeds InpMaxSpreadAtr. While this holds, "
+                 "every entry is filtered out. ***");
+
+   double per_lot=0.0;
+   double ask=g_symbol.Ask();
+   if(ask>0.0 &&
+      OrderCalcProfit(ORDER_TYPE_BUY,_Symbol,1.0,ask,ask-g_cfg.sl_atr*atr,per_lot) &&
+      per_lot!=0.0)
+     {
+      double budget=AccountInfoDouble(ACCOUNT_EQUITY)*g_cfg.risk_percent/100.0;
+      double want=budget/MathAbs(per_lot);
+      Log.Report(StringFormat("Sizing: %.2f%% of equity = %.2f, the %.2f x ATR stop costs "
+                              "%.2f per lot -> wants %s lots (broker minimum %s)",
+                              g_cfg.risk_percent,budget,g_cfg.sl_atr,MathAbs(per_lot),
+                              DoubleToString(want,4),g_symbol.LotsToString(g_symbol.vol_min)));
+      if(want<g_symbol.vol_min)
+        {
+         Log.Report("*** The risk budget cannot afford one minimum lot at this stop.  ***");
+         Log.Report("*** Every entry will be skipped. Raise InpRiskPercent, fund the  ***");
+         Log.Report("*** account higher, or trade a lower-priced instrument.          ***");
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| The facts that decide whether this EA can trade this symbol at    |
+//| all. Always printed, at any log level, in the tester too.         |
+//+------------------------------------------------------------------+
+void ReportEnvironment(void)
+  {
+   Log.Report("===============================================================");
+   Log.Report(StringFormat("TrendScalper on %s  entry %s  trend %s",
+                           _Symbol,TsTimeframeName(g_cfg.entry_tf),
+                           g_cfg.use_htf_filter ? TsTimeframeName(g_cfg.trend_tf) : "off"));
+   Log.Report(StringFormat("Volume: min %s  step %s  max %s   |  caps: per clip %s, total %s",
+                           g_symbol.LotsToString(g_symbol.vol_min),
+                           g_symbol.LotsToString(g_symbol.vol_step),
+                           g_symbol.LotsToString(g_symbol.vol_max),
+                           g_symbol.LotsToString(g_cfg.max_lots),
+                           g_symbol.LotsToString(g_cfg.max_total_lots)));
+   Log.Report(StringFormat("Spread now: %.1f points   ceiling: %.1f points",
+                           g_symbol.SpreadPoints(),g_cfg.max_spread_points));
+
+   g_filters.ReportSessionOverlap(_Symbol);
+   Log.Report("===============================================================");
+  }
+
+//+------------------------------------------------------------------+
 int OnInit(void)
   {
    Log.Init("TrendScalper",InpLogLevel,InpTesterVerbose);
@@ -220,6 +327,8 @@ int OnInit(void)
 
    if(!g_symbol.Init(_Symbol))
       return(INIT_FAILED);
+
+   AdaptVolumeCapsToSymbol();
 
    if(!g_signals.Init(g_cfg,GetPointer(g_symbol)))
       return(INIT_FAILED);
@@ -247,6 +356,12 @@ int OnInit(void)
                             book.Count(),g_symbol.LotsToString(book.Volume())));
      }
 
+   Diag.Reset();
+   g_last_diag_bar=0;
+   g_sizing_reported=false;
+
+   ReportEnvironment();
+
    g_ready=true;
    Log.Info("Initialised - waiting for a trend");
    return(INIT_SUCCEEDED);
@@ -260,6 +375,9 @@ void OnDeinit(const int reason)
 
    g_panel.Clear();
    g_signals.Release();
+
+   if(g_ready)
+      Diag.Report("Why entries were or were not taken (TrendScalper on "+_Symbol+")");
 
    Log.Info(StringFormat("Stopped (reason %d)",reason));
   }
@@ -275,6 +393,13 @@ void OnTick(void)
 
    SSignal sig;
    bool    fired=g_signals.Evaluate(sig);
+
+   //--- one-shot pre-flight, now that a real ATR and price exist
+   if(!g_sizing_reported && sig.ready && sig.atr>0.0)
+     {
+      g_sizing_reported=true;
+      ReportSizingCheck(sig.atr);
+     }
 
    //--- In new-bar mode an entry is evaluated once per bar, but only
    //--- after the schedule and spread filters have let us through, so a
@@ -313,35 +438,61 @@ void OnTick(void)
       return;
      }
 
-   //--- Entry path
+   //--- Entry path. Every branch records a tag so a run that takes no
+   //--- trades can still say exactly which gate turned each bar down.
    string reason="";
+   string tag="";
 
    if(!sig.ready)
+     {
       status="warming up";
+      tag=sig.tag;
+     }
    else
-      if(!g_risk.TradingAllowed(reason))
+      if(!g_risk.TradingAllowed(reason,tag))
          status="blocked: "+reason;
       else
-         if(!g_filters.CanEnter(now,sig.atr,reason))
+         if(!g_filters.CanEnter(now,sig.atr,reason,tag))
             status="waiting: "+reason;
          else
             if(!bar_gate)
+              {
                status=StringFormat("holding for the next %s bar",TsTimeframeName(g_cfg.entry_tf));
+               tag="";                       // not a blocker, just timing
+              }
             else
               {
                g_last_eval_bar=sig.bar_time;
 
                if(!fired)
+                 {
                   status="no setup: "+sig.reason;
+                  tag=sig.tag;
+                 }
                else
-                  if(g_exec.TryEnter(sig,reason))
+                  if(g_exec.TryEnter(sig,reason,tag))
                     {
                      g_filters.NoteEntry(now);
                      status=StringFormat("entered %s: %s",TsDirName(sig.direction),sig.reason);
+                     Diag.Attempt(tag);
+                     tag="";
                     }
                   else
+                    {
                      status="skipped: "+reason;
+                     Diag.Attempt(tag);
+                     Log.Debug("Entry skipped: "+reason);
+                     tag="";
+                    }
               }
+
+   //--- Sample the blocking reason once per bar, so the tally reads as a
+   //--- share of bars rather than of ticks.
+   if(sig.bar_time!=g_last_diag_bar)
+     {
+      g_last_diag_bar=sig.bar_time;
+      Diag.Gate(tag=="" ? "reached the entry check" : tag);
+     }
 
    SRiskState risk_now=g_risk.State();
    SBook      book_now=g_exec.Book();

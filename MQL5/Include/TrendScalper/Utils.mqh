@@ -205,13 +205,16 @@ public:
 
    bool              Contains(const datetime when) const
      {
+      MqlDateTime dt;
+      TimeToStruct(when,dt);
+      return(ContainsMinute(dt.hour*60+dt.min));
+     }
+
+   bool              ContainsMinute(const int now) const
+     {
       int cnt=ArraySize(m_from);
       if(cnt==0)
          return(false);
-
-      MqlDateTime dt;
-      TimeToStruct(when,dt);
-      int now=dt.hour*60+dt.min;
 
       for(int i=0;i<cnt;i++)
         {

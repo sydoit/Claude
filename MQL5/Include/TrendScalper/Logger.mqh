@@ -56,6 +56,10 @@ public:
 
    ENUM_TS_LOG_LEVEL Level(void) const { return(m_level); }
 
+   //--- Bypasses the level and the tester throttle. For start-up facts
+   //--- and the shutdown tally: output the user must never miss.
+   void              Report(const string msg) { Emit("----",msg); }
+
    void              Error(const string msg) { if(Allowed(TS_LOG_ERROR)) Emit("ERR ",msg); }
    void              Warn (const string msg) { if(Allowed(TS_LOG_WARN))  Emit("WARN",msg); }
    void              Info (const string msg) { if(Allowed(TS_LOG_INFO))  Emit("INFO",msg); }

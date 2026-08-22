@@ -51,7 +51,8 @@ broker, symbol and spread.** See [Before you go live](#before-you-go-live).
 | `MQL5/Include/TrendScalper/Dashboard.mqh` | On-chart status panel |
 | `MQL5/Include/TrendScalper/Utils.mqh` | Symbol metadata, lot/price normalisation |
 | `MQL5/Include/TrendScalper/Logger.mqh` | Leveled logging |
-| `presets/*.set` | Starting points for a couple of instruments |
+| `MQL5/Include/TrendScalper/Diagnostics.mqh` | Tally of why entries were or were not taken |
+| `presets/*.set` | Starting points for a few instruments |
 | `docs/STRATEGY.md` | The trading logic, rule by rule |
 | `docs/BACKTESTING.md` | How to test it without fooling yourself |
 
@@ -134,6 +135,55 @@ skipped rather than up-sized.
 windows in **broker server time**, and windows may wrap past midnight
 (`22:00-02:00`). Use `InpBlackout` to sit out scheduled news.
 
+## If it takes no trades
+
+The EA prints a block at start-up and a tally at shutdown, **at any log level,
+in the tester as well as live**. Read those first — between them they name the
+gate that blocked every bar:
+
+```
+Reason                                      count     share
+outside InpSessions window                  98214    94.31%
+ADX below minimum                            4102     3.94%
+sized volume below broker minimum             982     0.94%
+> entered                                      37
+```
+
+Lines beginning with `>` are entry attempts; the rest are per-bar samples.
+
+The two traps that cost a whole backtest, both of which the start-up block now
+calls out explicitly:
+
+**Sessions are in broker server time, not exchange time.** The default
+`07:00-11:00,13:00-17:00` is shaped for the London/Frankfurt forex day. A
+typical broker runs on EET, so the New York cash open at 09:30 ET is **16:30
+server time** — the defaults miss almost the entire US stock session. On any
+exchange-hours symbol (shares, index CFDs), set `InpSessions = ""` and let the
+broker's own session table do the gating. Start-up prints the actual overlap:
+
+```
+Tradable minutes per weekday (broker session x InpSessions):
+  Mon 30m  Tue 30m  Wed 30m  Thu 30m  Fri 30m
+```
+
+**"Lots" only means the same thing across forex pairs.** A share CFD is
+usually quoted in shares, with a minimum and a step of 1. The forex-shaped
+`InpMaxLots = 0.10` then floors to zero on every tick and no order can ever be
+sized — silently, forever. The EA now raises an impossible cap to the broker
+minimum and says so; even better, set `InpMaxLots = 0` and
+`InpMaxTotalLots = 0` on such symbols and let `InpRiskPercent` govern size.
+Start-up also checks the risk budget can afford one minimum lot at the
+configured stop:
+
+```
+Sizing: 0.25% of equity = 25.00, the 1.20 x ATR stop costs 0.62 per lot
+        -> wants 40.3226 lots (broker minimum 1.00)
+```
+
+If that "wants" figure is below the broker minimum, every entry is skipped —
+raise `InpRiskPercent`, fund the account higher, or trade a lower-priced
+instrument.
+
 ## Running more than one chart
 
 Give every chart its **own `InpMagic`**. The EA only ever counts, manages and
@@ -176,3 +226,7 @@ responsible for anything it does on your account.
 * **Server time, not local time.** All schedule inputs use broker time, which
   may differ from yours by several hours and may shift with DST.
 * **One symbol per instance.** The EA trades the chart it is attached to.
+* **The defaults are forex-shaped.** Session windows and the lot caps assume a
+  24-hour, 0.01-lot instrument. On shares, index CFDs or crypto, start from
+  `presets/NVDA_M5_shares.set` and read the start-up block before judging the
+  results.

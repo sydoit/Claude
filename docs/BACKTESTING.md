@@ -19,6 +19,28 @@ In the Strategy Tester:
   raw-spread. Ignoring commission on a high-frequency strategy is the single
   biggest way to fake a profitable curve.
 
+## 1b. Read the start-up block before anything else
+
+The EA prints an environment block at start-up and a reason tally at shutdown,
+at any log level, in the tester too. If a run produced **no trades**, those two
+blocks contain the answer — do not start changing signal parameters until you
+have read them.
+
+The tally samples the blocking reason once per bar:
+
+```
+120184 bars evaluated, 41 entry attempts
+Reason                                      count     share
+outside InpSessions window                  98214    81.72%
+ADX below minimum                           18442    15.35%
+spread too wide relative to ATR              3491     2.91%
+> entered                                      37
+> sized volume below broker minimum              4
+```
+
+Anything above ~90 % on a single non-signal row (sessions, spread, volume) is a
+configuration problem, not a strategy result.
+
 ## 2. First run: sanity, not profit
 
 Run once with the defaults and read the journal, not the report. You are

@@ -65,8 +65,8 @@ public:
    SBook             Book(void) const { return(m_book); }
    bool              IsHedging(void) const { return(m_hedging); }
 
-   bool              CanStack(const int dir,const double atr,string &reason) const;
-   bool              TryEnter(const SSignal &sig,string &reason);
+   bool              CanStack(const int dir,const double atr,string &reason,string &tag) const;
+   bool              TryEnter(const SSignal &sig,string &reason,string &tag);
    void              ManageOpen(const SSignal &sig,const bool flatten_all,const string flatten_reason);
    int               CloseDirection(const int dir,const string why);
    int               CloseAll(const string why);
@@ -348,8 +348,10 @@ void CTradeExecutor::PrunePartials(void)
 //| our favour, which is what turns the EA into a trend follower     |
 //| rather than an averaging-down machine.                           |
 //+------------------------------------------------------------------+
-bool CTradeExecutor::CanStack(const int dir,const double atr,string &reason) const
+bool CTradeExecutor::CanStack(const int dir,const double atr,string &reason,string &tag) const
   {
+   tag="";
+
    int    count   = (dir>0) ? m_book.count_buy      : m_book.count_sell;
    double profit  = (dir>0) ? m_book.profit_buy     : m_book.profit_sell;
    double anchor  = (dir>0) ? m_book.best_buy_entry : m_book.best_sell_entry;
@@ -358,6 +360,7 @@ bool CTradeExecutor::CanStack(const int dir,const double atr,string &reason) con
    if(opposite>0 && !m_hedging)
      {
       reason="opposite exposure open on a netting account";
+      tag="opposite exposure (netting)";
       return(false);
      }
    if(count==0)
@@ -368,11 +371,13 @@ bool CTradeExecutor::CanStack(const int dir,const double atr,string &reason) con
    if(count>=m_cfg.max_positions)
      {
       reason=StringFormat("already holding %d/%d clips",count,m_cfg.max_positions);
+      tag="InpMaxPositions reached";
       return(false);
      }
    if(m_cfg.add_only_in_profit && profit<=0.0)
      {
       reason="open clips are not in profit";
+      tag="open clips not in profit";
       return(false);
      }
    if(m_cfg.add_step_atr>0.0 && atr>0.0 && anchor>0.0)
@@ -384,6 +389,7 @@ bool CTradeExecutor::CanStack(const int dir,const double atr,string &reason) con
         {
          reason=StringFormat("price has moved %.1f%% of the %.2f ATR add-step",
                              need>0.0 ? moved/need*100.0 : 0.0,m_cfg.add_step_atr);
+         tag="add-step not reached";
          return(false);
         }
      }
@@ -393,21 +399,25 @@ bool CTradeExecutor::CanStack(const int dir,const double atr,string &reason) con
   }
 
 //+------------------------------------------------------------------+
-bool CTradeExecutor::TryEnter(const SSignal &sig,string &reason)
+bool CTradeExecutor::TryEnter(const SSignal &sig,string &reason,string &tag)
   {
+   tag="";
+
    int dir=sig.direction;
    if(dir==0)
      {
       reason="no direction";
+      tag="no direction";
       return(false);
      }
    if(sig.atr<=0.0)
      {
       reason="atr unavailable";
+      tag="ATR unavailable";
       return(false);
      }
 
-   if(!CanStack(dir,sig.atr,reason))
+   if(!CanStack(dir,sig.atr,reason,tag))
       return(false);
 
    //--- flatten the other side before turning around
@@ -419,6 +429,7 @@ bool CTradeExecutor::TryEnter(const SSignal &sig,string &reason)
       else
         {
          reason="opposite clips still open";
+         tag="opposite clips still open";
          return(false);
         }
      }
@@ -433,18 +444,20 @@ bool CTradeExecutor::TryEnter(const SSignal &sig,string &reason)
    tp=ClampTarget(dir,price,tp);
 
    double existing=m_book.Volume();
-   double lots=m_risk.CalcLots(dir,price,sl,existing,reason);
+   double lots=m_risk.CalcLots(dir,price,sl,existing,reason,tag);
    if(lots<=0.0)
       return(false);
 
    if(!SendMarket(dir,lots,sl,tp,sig.reason))
      {
       reason="order rejected";
+      tag="order rejected by the server";
       return(false);
      }
 
    RefreshBook();
    reason="";
+   tag="entered";
    return(true);
   }
 

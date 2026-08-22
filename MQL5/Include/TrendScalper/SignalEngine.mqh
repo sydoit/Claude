@@ -29,7 +29,8 @@ struct SSignal
    double            ema_fast;
    double            ema_slow;
    datetime          bar_time;
-   string            reason;        // why we did / did not fire
+   string            reason;        // why we did / did not fire, in words
+   string            tag;           // same thing from a fixed vocabulary, for the tally
    bool              ready;         // indicator data usable this tick
   };
 
@@ -64,7 +65,7 @@ private:
    int               EvaluateBias(void) const;
    int               EvaluateTrend(void) const;
    bool              RsiAllows(const int dir) const;
-   bool              TriggerFires(const int dir,string &why) const;
+   bool              TriggerFires(const int dir,string &why,string &tag) const;
    double            HighestHigh(const int from,const int count) const;
    double            LowestLow(const int from,const int count) const;
 
@@ -262,12 +263,15 @@ bool CSignalEngine::RsiAllows(const int dir) const
 //+------------------------------------------------------------------+
 //| Trigger check against the live price.                            |
 //+------------------------------------------------------------------+
-bool CSignalEngine::TriggerFires(const int dir,string &why) const
+bool CSignalEngine::TriggerFires(const int dir,string &why,string &tag) const
   {
+   tag="no trigger (pullback/breakout)";
+
    double atr=m_atr[1];
    if(atr<=0.0)
      {
       why="atr unavailable";
+      tag="ATR unavailable";
       return(false);
      }
 
@@ -286,6 +290,7 @@ bool CSignalEngine::TriggerFires(const int dir,string &why) const
          if(dipped && held && bullish && ask>m_rates[1].high)
            {
             why="pullback resumed above prior bar high";
+            tag="entry signal";
             return(true);
            }
         }
@@ -295,6 +300,7 @@ bool CSignalEngine::TriggerFires(const int dir,string &why) const
          if(hh>-DBL_MAX && ask>hh+m_cfg.breakout_buffer_atr*atr)
            {
             why=StringFormat("broke %d-bar high",m_cfg.breakout_lookback);
+            tag="entry signal";
             return(true);
            }
         }
@@ -312,6 +318,7 @@ bool CSignalEngine::TriggerFires(const int dir,string &why) const
          if(popped && held && bearish && bid<m_rates[1].low)
            {
             why="pullback resumed below prior bar low";
+            tag="entry signal";
             return(true);
            }
         }
@@ -321,6 +328,7 @@ bool CSignalEngine::TriggerFires(const int dir,string &why) const
          if(ll<DBL_MAX && bid<ll-m_cfg.breakout_buffer_atr*atr)
            {
             why=StringFormat("broke %d-bar low",m_cfg.breakout_lookback);
+            tag="entry signal";
             return(true);
            }
         }
@@ -345,11 +353,13 @@ bool CSignalEngine::Evaluate(SSignal &out)
    out.ema_slow=0.0;
    out.bar_time=0;
    out.reason="";
+   out.tag="";
    out.ready=false;
 
    if(!Pull())
      {
       out.reason="warming up";
+      out.tag="indicator warm-up / no history";
       return(false);
      }
 
@@ -366,33 +376,40 @@ bool CSignalEngine::Evaluate(SSignal &out)
    if(out.trend==0)
      {
       out.reason="no trend on entry timeframe";
+      out.tag="no trend (EMA stack or slope)";
       return(false);
      }
    if(m_cfg.use_htf_filter && out.bias!=out.trend)
      {
       out.reason=StringFormat("higher timeframe disagrees (bias %s)",TsDirName(out.bias));
+      out.tag="higher timeframe disagrees";
       return(false);
      }
    if(out.adx<m_cfg.adx_min)
      {
       out.reason=StringFormat("ADX %.1f below %.1f",out.adx,m_cfg.adx_min);
+      out.tag="ADX below minimum";
       return(false);
      }
    if(!RsiAllows(out.trend))
      {
       out.reason=StringFormat("RSI %.1f outside entry band",out.rsi);
+      out.tag="RSI outside entry band";
       return(false);
      }
 
    string why="";
-   if(!TriggerFires(out.trend,why))
+   string tag="";
+   if(!TriggerFires(out.trend,why,tag))
      {
       out.reason=why;
+      out.tag=tag;
       return(false);
      }
 
    out.direction=out.trend;
    out.reason=why;
+   out.tag=tag;
    return(true);
   }
 

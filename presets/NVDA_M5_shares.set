@@ -1,0 +1,95 @@
+; TrendScalper - NVDA (and US share CFDs generally), M5
+; 
+; Two settings differ from the forex defaults for reasons that otherwise
+; stop the EA trading entirely:
+; 
+;   InpSessions = ""   The forex default (07:00-11:00,13:00-17:00 SERVER
+;                      time) barely overlaps US cash hours - NYSE opens at
+;                      16:30 server time on a typical EET broker. Blank
+;                      lets the broker's own session table gate trading,
+;                      which is what you want on an exchange-hours symbol.
+; 
+;   InpMaxLots     = 0  Volume on a share CFD is quoted in shares, often
+;   InpMaxTotalLots= 0  with a minimum and step of 1. A forex-shaped cap
+;                       like 0.10 floors to zero on every tick and no order
+;                       is ever sized. 0 means "no cap" - InpRiskPercent
+;                       alone governs the size, which is the honest control
+;                       here. Set a real share cap if you want a hard one.
+; 
+; InpFridayCloseHour is off because a server-time cut-off tuned for forex
+; lands mid-session on a US stock. InpMaxHoldSeconds keeps clips short.
+; 
+; Enum inputs are stored as integers:
+;   InpLogLevel      0=off 1=error 2=warn 3=info 4=debug
+;   InpEntryMode     0=pullback 1=breakout 2=either
+;   InpTiming        0=every tick 1=new bar
+;   InpLotMode       0=fixed 1=risk percent
+;   InpTrailMode     0=none 1=ATR 2=fast EMA
+;   Timeframes       1=M1 5=M5 15=M15 30=M30 16385=H1 16388=H4
+InpMagic=770303
+InpComment=TrendScalper
+InpLogLevel=3
+InpTesterVerbose=false
+InpShowDashboard=true
+InpCloseOnDeinit=false
+InpEntryTF=5
+InpTrendTF=16385
+InpUseHtfFilter=true
+InpEmaFast=12
+InpEmaSlow=34
+InpEmaSlopeLookback=3
+InpHtfEmaFast=20
+InpHtfEmaSlow=50
+InpAtrPeriod=14
+InpAdxPeriod=14
+InpAdxMin=22.0
+InpRsiPeriod=14
+InpRsiBuyMin=45.0
+InpRsiBuyMax=78.0
+InpRsiSellMin=22.0
+InpRsiSellMax=55.0
+InpEntryMode=2
+InpTiming=0
+InpBreakoutLookback=8
+InpBreakoutBufferAtr=0.05
+InpPullbackDepthAtr=0.35
+InpLotMode=1
+InpFixedLots=0.01
+InpRiskPercent=0.25
+InpMaxLots=0
+InpMaxTotalLots=0
+InpStopLossAtr=1.20
+InpUseTakeProfit=true
+InpTakeProfitAtr=1.80
+InpBreakEvenAtr=0.80
+InpBreakEvenOffsetPts=5.0
+InpTrailMode=1
+InpTrailAtr=1.00
+InpTrailStartAtr=1.00
+InpPartialClosePct=50.0
+InpPartialTriggerAtr=1.00
+InpMaxHoldSeconds=7200
+InpExitOnFlip=true
+InpMaxPositions=3
+InpAddStepAtr=0.75
+InpAddOnlyInProfit=true
+InpCooldownSeconds=60
+InpMaxSpreadPoints=15.0
+InpMaxSpreadAtr=0.25
+InpDailyLossPercent=2.0
+InpDailyProfitPercent=3.0
+InpMaxDrawdownPercent=10.0
+InpMaxConsecLosses=4
+InpMaxTradesPerDay=20
+InpMinFreeMarginPct=30.0
+InpFlattenOnHalt=true
+InpMaxSlippagePoints=10
+InpOrderRetries=3
+InpSessions=
+InpBlackout=
+InpTradeMonday=true
+InpTradeTuesday=true
+InpTradeWednesday=true
+InpTradeThursday=true
+InpTradeFriday=true
+InpFridayCloseHour=-1
