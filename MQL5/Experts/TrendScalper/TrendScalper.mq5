@@ -18,7 +18,7 @@
 //+------------------------------------------------------------------+
 #property copyright "TrendScalper"
 #property link      "https://github.com/sydoit/Claude"
-#property version   "1.00"
+#property version   "1.02"
 #property description "Trend-following micro-scalper: small clips, ATR risk control, session and drawdown guards."
 
 #include <TrendScalper/Logger.mqh>
@@ -299,6 +299,7 @@ void ReportSizingCheck(const double atr)
 void ReportEnvironment(void)
   {
    Log.Report("===============================================================");
+   Log.Report("TrendScalper build 1.02 (diagnostics enabled)");
    Log.Report(StringFormat("TrendScalper on %s  entry %s  trend %s",
                            _Symbol,TsTimeframeName(g_cfg.entry_tf),
                            g_cfg.use_htf_filter ? TsTimeframeName(g_cfg.trend_tf) : "off"));

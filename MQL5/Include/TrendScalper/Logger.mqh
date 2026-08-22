@@ -26,6 +26,7 @@ private:
    string            m_tag;
    bool              m_in_tester;
    bool              m_tester_verbose;
+   string            m_transcript[];      // Report() lines, for the diagnostics file
 
    void              Emit(const string lvl,const string msg)
      {
@@ -57,8 +58,24 @@ public:
    ENUM_TS_LOG_LEVEL Level(void) const { return(m_level); }
 
    //--- Bypasses the level and the tester throttle. For start-up facts
-   //--- and the shutdown tally: output the user must never miss.
-   void              Report(const string msg) { Emit("----",msg); }
+   //--- and the shutdown tally: output the user must never miss. Every
+   //--- line is also kept so the diagnostics file can replay the lot.
+   void              Report(const string msg)
+     {
+      Emit("----",msg);
+      int n=ArraySize(m_transcript);
+      if(n<300)
+        {
+         ArrayResize(m_transcript,n+1);
+         m_transcript[n]=msg;
+        }
+     }
+
+   int               TranscriptSize(void) const { return(ArraySize(m_transcript)); }
+   string            TranscriptLine(const int i) const
+     {
+      return(i>=0 && i<ArraySize(m_transcript) ? m_transcript[i] : "");
+     }
 
    void              Error(const string msg) { if(Allowed(TS_LOG_ERROR)) Emit("ERR ",msg); }
    void              Warn (const string msg) { if(Allowed(TS_LOG_WARN))  Emit("WARN",msg); }

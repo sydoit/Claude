@@ -181,9 +181,38 @@ windows in **broker server time**, and windows may wrap past midnight
 
 ## If it takes no trades
 
-The EA prints a block at start-up and a tally at shutdown, **at any log level,
-in the tester as well as live**. Read those first — between them they name the
-gate that blocked every bar:
+The EA writes a self-contained report to a text file every time it stops —
+start-up facts, a verdict, and the tally — so you never have to dig through the
+Journal tab:
+
+```
+%APPDATA%\MetaQuotes\Terminal\Common\Files\TrendScalper_<SYMBOL>_diagnostics.txt
+```
+
+Paste that path into Explorer's address bar (on macOS:
+`~/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/users/…/Common/Files/`).
+The same text goes to the Journal at any log level, in the tester as well as
+live.
+
+**If that file does not appear at all, you are running a stale compiled EA.**
+Re-copy `MQL5/Include/TrendScalper/` (it gained new files) and recompile with
+F7. The start-up block names the build — anything that does not say
+`build 1.02 (diagnostics enabled)` is the old one.
+
+The report opens with a verdict:
+
+```
+VERDICT: no entry was ever attempted.
+
+The gate that blocked the most bars (94.3% of them) was:
+  outside InpSessions window
+
+  InpSessions never opens while this symbol is quoted. It is in BROKER
+  SERVER TIME. Clear it to blank and let the broker's own session table
+  gate trading.
+```
+
+followed by the full tally:
 
 ```
 Reason                                      count     share
