@@ -1,0 +1,91 @@
+; RangeReverter - XAUUSD M15, wider everything
+; Load it from the EA inputs dialog or the Strategy Tester: Load.
+; All times are broker server time - check the windows against your broker.
+;
+; Enum inputs are stored as integers:
+;   InpLogLevel      0=off 1=error 2=warn 3=info 4=debug
+;   InpEntryMode     0=touch 1=rejection bar 2=either
+;   InpTiming        0=every tick 1=new bar
+;   InpLotMode       0=fixed 1=risk percent
+;   InpTargetMode    0=fraction of the way to the mean 1=fixed ATR
+;   InpTrailMode     0=none 1=ATR
+;   Timeframes       1=M1 5=M5 15=M15 30=M30 16385=H1 16388=H4
+;
+; Gold trends hard and then goes completely dead, so the regime filter has
+; to do more work here: a tighter ADX ceiling, a stricter band-expansion
+; veto, and a regime exit that fires early. Stops are wide because gold's
+; band pierces are wide - size is handled by InpRiskPercent, not by the stop.
+
+InpMagic=770502
+InpComment=RangeReverter
+InpLogLevel=3
+InpTesterVerbose=false
+InpShowDashboard=true
+InpCloseOnDeinit=false
+InpEntryTF=15
+InpTrendTF=16388
+InpUseHtfFilter=true
+InpBandPeriod=20
+InpBandDeviation=2.2
+InpAtrPeriod=14
+InpAdxPeriod=14
+InpAdxMax=18.0
+InpHtfEmaFast=20
+InpHtfEmaSlow=50
+InpHtfFlatAtr=1.00
+InpBandExpansionMax=1.40
+InpMinEdgeAtr=0.80
+InpMinEdgeSpreads=6.0
+InpMinRewardRisk=0.50
+InpEntryMode=2
+InpTiming=0
+InpRsiPeriod=14
+InpRsiOversold=25.0
+InpRsiOverbought=75.0
+InpTouchBufferAtr=0.00
+InpMaxRideBars=0
+InpMaxBarAtr=1.80
+InpLotMode=1
+InpFixedLots=0.01
+InpRiskPercent=0.25
+InpMaxLots=0.0
+InpMaxTotalLots=0.0
+InpStopLossAtr=2.00
+InpStopBeyondBandAtr=0.75
+InpTargetMode=0
+InpTargetMidFraction=0.70
+InpTakeProfitAtr=1.00
+InpTrackMean=true
+InpBreakEvenPct=60.0
+InpBreakEvenOffsetPts=5.0
+InpTrailMode=0
+InpTrailAtr=1.00
+InpTrailStartPct=70.0
+InpPartialClosePct=0.0
+InpPartialTriggerPct=60.0
+InpMaxHoldSeconds=14400
+InpExitOnRegimeBreak=true
+InpAdxExit=26.0
+InpBreakExitAtr=0.60
+InpMaxPositions=1
+InpAddStepAtr=1.00
+InpCooldownSeconds=300
+InpMaxSpreadPoints=0.0
+InpMaxSpreadAtr=0.15
+InpDailyLossPercent=2.0
+InpDailyProfitPercent=3.0
+InpMaxDrawdownPercent=10.0
+InpMaxConsecLosses=4
+InpMaxTradesPerDay=6
+InpMinFreeMarginPct=30.0
+InpFlattenOnHalt=true
+InpMaxSlippagePoints=10
+InpOrderRetries=3
+InpSessions=
+InpBlackout=
+InpTradeMonday=true
+InpTradeTuesday=true
+InpTradeWednesday=true
+InpTradeThursday=true
+InpTradeFriday=true
+InpFridayCloseHour=20

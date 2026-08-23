@@ -1,0 +1,91 @@
+; RangeReverter - EURUSD M5, conservative starting point
+; Load it from the EA inputs dialog or the Strategy Tester: Load.
+; All times are broker server time - check the windows against your broker.
+;
+; Enum inputs are stored as integers:
+;   InpLogLevel      0=off 1=error 2=warn 3=info 4=debug
+;   InpEntryMode     0=touch 1=rejection bar 2=either
+;   InpTiming        0=every tick 1=new bar
+;   InpLotMode       0=fixed 1=risk percent
+;   InpTargetMode    0=fraction of the way to the mean 1=fixed ATR
+;   InpTrailMode     0=none 1=ATR
+;   Timeframes       1=M1 5=M5 15=M15 30=M30 16385=H1 16388=H4
+;
+; EURUSD spends most of its day going nowhere, which is the regime this
+; EA wants. M5 bands with an H1 flatness check; the spread floor
+; (InpMinEdgeSpreads) is the gate that will reject most of the quiet hours,
+; and that is the point - a 4-spread trip to the mean is not a trade.
+
+InpMagic=770501
+InpComment=RangeReverter
+InpLogLevel=3
+InpTesterVerbose=false
+InpShowDashboard=true
+InpCloseOnDeinit=false
+InpEntryTF=5
+InpTrendTF=16385
+InpUseHtfFilter=true
+InpBandPeriod=20
+InpBandDeviation=2.0
+InpAtrPeriod=14
+InpAdxPeriod=14
+InpAdxMax=20.0
+InpHtfEmaFast=20
+InpHtfEmaSlow=50
+InpHtfFlatAtr=1.00
+InpBandExpansionMax=1.60
+InpMinEdgeAtr=0.60
+InpMinEdgeSpreads=5.0
+InpMinRewardRisk=0.50
+InpEntryMode=2
+InpTiming=0
+InpRsiPeriod=14
+InpRsiOversold=28.0
+InpRsiOverbought=72.0
+InpTouchBufferAtr=0.00
+InpMaxRideBars=1
+InpMaxBarAtr=2.00
+InpLotMode=1
+InpFixedLots=0.01
+InpRiskPercent=0.25
+InpMaxLots=0.10
+InpMaxTotalLots=0.50
+InpStopLossAtr=1.50
+InpStopBeyondBandAtr=0.50
+InpTargetMode=0
+InpTargetMidFraction=0.80
+InpTakeProfitAtr=1.00
+InpTrackMean=true
+InpBreakEvenPct=60.0
+InpBreakEvenOffsetPts=5.0
+InpTrailMode=0
+InpTrailAtr=1.00
+InpTrailStartPct=70.0
+InpPartialClosePct=0.0
+InpPartialTriggerPct=60.0
+InpMaxHoldSeconds=7200
+InpExitOnRegimeBreak=true
+InpAdxExit=30.0
+InpBreakExitAtr=0.75
+InpMaxPositions=1
+InpAddStepAtr=1.00
+InpCooldownSeconds=60
+InpMaxSpreadPoints=12.0
+InpMaxSpreadAtr=0.20
+InpDailyLossPercent=2.0
+InpDailyProfitPercent=3.0
+InpMaxDrawdownPercent=10.0
+InpMaxConsecLosses=4
+InpMaxTradesPerDay=12
+InpMinFreeMarginPct=30.0
+InpFlattenOnHalt=true
+InpMaxSlippagePoints=10
+InpOrderRetries=3
+InpSessions=07:00-19:00
+InpBlackout=
+InpTradeMonday=true
+InpTradeTuesday=true
+InpTradeWednesday=true
+InpTradeThursday=true
+InpTradeFriday=true
+InpFridayCloseHour=20

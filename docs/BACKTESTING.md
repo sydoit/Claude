@@ -10,8 +10,10 @@ In the Strategy Tester:
 * **Model:** *Every tick based on real ticks*. Nothing else is meaningful for a
   strategy that enters mid-bar — "Open prices only" and "1 minute OHLC" will
   invent fills the EA could never get.
-* **Period:** at least 6 months, and include a range-bound stretch, not only a
-  trending one.
+* **Period:** at least 6 months, and include both regimes — a range-bound
+  stretch and a strongly trending one. Each EA is at its worst in the other's
+  market, and a period containing only one of them tells you nothing about
+  either.
 * **Deposit and leverage:** whatever your real account uses.
 * **Spread:** *Current* uses the live spread; real-tick data carries its own
   spread, which is what you want. Do not test on a fixed 1-point spread.
@@ -52,9 +54,9 @@ checking that:
   few months of M1 means the filters are too loose),
 * no repeated `Order attempt … failed` lines.
 
-Set `InpTesterVerbose = true` and `InpLogLevel = TS_LOG_DEBUG` if you need to
-see why signals are being rejected — but turn it back off, verbose logging
-slows the tester by an order of magnitude.
+Set `InpTesterVerbose = true` and `InpLogLevel = TS_LOG_DEBUG` (RangeReverter:
+`RR_LOG_DEBUG`) if you need to see why signals are being rejected — but turn it
+back off, verbose logging slows the tester by an order of magnitude.
 
 ## 3. Read the right numbers
 
@@ -88,12 +90,46 @@ Reasonable ranges:
 | `InpBreakoutLookback` | 4 | 20 | 1 |
 | `InpAddStepAtr` | 0.4 | 1.5 | 0.1 |
 
+For RangeReverter:
+
+| Input | From | To | Step |
+|---|---|---|---|
+| `InpAdxMax` | 14 | 28 | 1 |
+| `InpBandDeviation` | 1.6 | 2.8 | 0.1 |
+| `InpMinEdgeSpreads` | 2.0 | 10.0 | 0.5 |
+| `InpStopLossAtr` | 1.0 | 3.0 | 0.1 |
+| `InpTargetMidFraction` | 0.5 | 1.0 | 0.05 |
+| `InpAdxExit` | 24 | 40 | 1 |
+| `InpMaxHoldSeconds` | 1800 | 14400 | 900 |
+
 Leave the risk and guard inputs out of the optimisation. Optimising
 `InpRiskPercent` optimises for the luckiest sequence of trades in the sample,
 which is the opposite of what those inputs are for.
 
 Then **walk it forward**: optimise on one period, test on the next untouched
 period. If the out-of-sample result collapses, the parameters were fitted.
+
+### Testing a mean reverter is different
+
+RangeReverter needs a harder look at the sample than TrendScalper does, for one
+reason: a mean-reversion equity curve looks wonderful right up to the trend that
+breaks it, and a test period that happens not to contain one will flatter it
+enormously.
+
+* **Pick the period adversarially.** Deliberately include the sharpest
+  directional move in recent history for the symbol. If the curve survives that,
+  the regime filters are doing their job; if you have to exclude it to get a
+  good result, you have not tested the strategy, you have selected a sample.
+* **Read the losing trades, not the winners.** With a high hit rate the report's
+  averages hide everything. Sort by loss and look at the largest few — they
+  should all be regime exits or stops, and none should be a fade that sat open
+  through a whole trend leg. If one did, `InpAdxExit` or `InpBreakExitAtr` is
+  too loose.
+* **Watch the maximum adverse excursion**, not just the drawdown. A fade that
+  came back from -3 ATR to close at target is a loss that has not happened yet.
+* **Never optimise `InpMaxPositions` above 1.** The optimiser will love it,
+  because averaging down converts many small losses into a few enormous ones and
+  most metrics reward that trade until the day it does not.
 
 ## 5. Forward-test on demo
 

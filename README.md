@@ -1,4 +1,29 @@
-# TrendScalper — automated trend-following scalper for MetaTrader 5
+# Automated trading systems for MetaTrader 5
+
+Two Expert Advisors that trade opposite market regimes, sharing the same risk
+engine, session filters and diagnostics.
+
+| | **TrendScalper** | **RangeReverter** |
+|---|---|---|
+| Trades when | the market trends (`ADX ≥ 20`) | the market does not (`ADX ≤ 22`) |
+| Direction | with the move | against the extreme |
+| Signal | EMA stack + slope, pullback or micro-breakout | Bollinger band touch or rejection, RSI stretched |
+| Target | `1.8 × ATR` | back to the middle band, which the target follows |
+| Adds to a position | into strength, up to 4 clips | never — averaging down is off by default |
+| The way it fails | chop, paying the spread repeatedly | one fade held through a trend |
+| Docs | [`docs/STRATEGY.md`](docs/STRATEGY.md) | [`docs/RANGEREVERTER.md`](docs/RANGEREVERTER.md) |
+
+Their regime filters are near-complements, so on the same symbol they mostly do
+not trade at the same time. Give every instance its own `InpMagic` — see
+[Running more than one chart](#running-more-than-one-chart).
+
+**Trading real money with these — or any — automated system can lose money
+quickly. Run them on a demo account until you understand their behaviour on
+your broker, symbol and spread.** See [Before you go live](#before-you-go-live).
+
+---
+
+# TrendScalper
 
 An Expert Advisor that trades small clips, quickly, in the direction of the
 prevailing trend. It waits for a higher-timeframe bias and a same-direction
@@ -6,12 +31,6 @@ trend on the entry timeframe, enters on a pullback that resumes or a micro
 breakout, then manages the position with an ATR stop that moves to break-even
 and trails. Every entry is sized from a fixed slice of equity, and a set of
 account-level breakers stops trading when the day goes wrong.
-
-**Trading real money with this — or any — automated system can lose money
-quickly. Run it on a demo account until you understand its behaviour on your
-broker, symbol and spread.** See [Before you go live](#before-you-go-live).
-
----
 
 ## What it actually does
 
@@ -56,6 +75,11 @@ broker, symbol and spread.** See [Before you go live](#before-you-go-live).
 | `docs/STRATEGY.md` | The trading logic, rule by rule |
 | `docs/BACKTESTING.md` | How to test it without fooling yourself |
 
+RangeReverter lives in `MQL5/Experts/RangeReverter/` and
+`MQL5/Include/RangeReverter/` with the same module layout. The two include
+trees are deliberately independent copies rather than a shared library, so
+either EA can be installed on its own by copying one folder.
+
 ## Install
 
 1. In MetaTrader 5: **File → Open Data Folder**. That opens `…/Terminal/<hash>/`.
@@ -63,8 +87,11 @@ broker, symbol and spread.** See [Before you go live](#before-you-go-live).
    folder, keeping the structure:
    * `MQL5/Experts/TrendScalper/TrendScalper.mq5`
    * `MQL5/Include/TrendScalper/*.mqh`
+   * `MQL5/Experts/RangeReverter/RangeReverter.mq5` (optional)
+   * `MQL5/Include/RangeReverter/*.mqh` (optional)
 3. Open MetaEditor (**F4**), open `TrendScalper.mq5`, press **F7** to compile.
-   It should report `0 errors, 0 warnings`.
+   It should report `0 errors, 0 warnings`. Repeat for `RangeReverter.mq5` if
+   you copied it.
 4. Back in the terminal, refresh the Navigator, drag **TrendScalper** onto a
    chart of the symbol you want to trade.
 5. On the **Common** tab tick **Allow Algo Trading**, set the inputs, press OK.
@@ -102,6 +129,11 @@ buttons more consistently than the tester has:
 **If you cannot find the control at all**, type the values in by hand — click a
 **Value** cell in the grid and edit it. A `.set` is plain text, so you can read
 the values straight out of it, and only a handful differ from the defaults.
+The presets are `EURUSD_M1_conservative.set`, `XAUUSD_M5_wider.set` and
+`NVDA_M5_shares.set` for TrendScalper, and `EURUSD_M5_range.set` and
+`XAUUSD_M15_range.set` for RangeReverter. A preset only loads into the EA it
+was written for.
+
 For `NVDA_M5_shares.set` just three of them decide whether the EA trades at
 all: `InpSessions` (clear it to blank), `InpMaxLots` = `0` and
 `InpMaxTotalLots` = `0`. The rest are tuning.
@@ -256,6 +288,47 @@ Sizing: 0.25% of equity = 25.00, the 1.20 x ATR stop costs 0.62 per lot
 If that "wants" figure is below the broker minimum, every entry is skipped —
 raise `InpRiskPercent`, fund the account higher, or trade a lower-priced
 instrument.
+
+---
+
+# RangeReverter
+
+The mean-reversion side. It fades the edges of a range back towards the middle
+Bollinger band, and spends most of its time refusing to trade.
+
+```
+ regime                 edge                extreme            management
+ ──────                 ────                ───────            ──────────
+ ADX <= 22          band-to-mean must   price at a band     target = the mean
+ HTF EMAs flat      clear an ATR floor  + RSI stretched     → follows it inwards
+ bands not          AND several         + not being ridden  → break-even at 60%
+ expanding          spreads             + no violent bar    → regime exit
+        │                  │                    │           → time exit
+        └──────────────────┴────────────────────┴──────────────────┘
+                              fade it, once
+```
+
+* **Most of the work is deciding not to trade.** Three regime vetoes, two
+  economic floors and three extremeness vetoes sit in front of the trigger. A
+  diagnostics tally dominated by `ADX above range ceiling` or `edge does not
+  cover the spread` is the EA working, not a misconfiguration.
+* **The target follows the mean, but only closer.** The middle band moves while
+  the trade is open. Drifting towards the position pulls the target in and ends
+  the trade sooner; drifting away is the range failing, and the EA does not
+  chase it.
+* **There is a regime exit.** ADX waking up, or price running past the faded
+  band, closes the position immediately. Mean reversion has exactly one fatal
+  failure mode and this is the rule that addresses it.
+* **No averaging down.** `InpMaxPositions` defaults to `1`. Raising it is
+  allowed and the EA warns you about it at start-up.
+
+Start from `presets/EURUSD_M5_range.set` or `presets/XAUUSD_M15_range.set`, and
+read [`docs/RANGEREVERTER.md`](docs/RANGEREVERTER.md) for the rules in full.
+
+Everything below about installing presets, sizing, the diagnostics file,
+running several charts and going live applies to both EAs — the input names for
+size, guards and schedule are deliberately identical. Where RangeReverter
+differs is documented in its own file.
 
 ## Running more than one chart
 
