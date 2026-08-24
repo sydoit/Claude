@@ -1,0 +1,19 @@
+[Unit]
+Description=Market research agent, one pass over the watchlist
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/repo/agent
+Environment=SYMBOLS=NVDA AAPL
+Environment=EXECUTE=1
+ExecStart=/path/to/repo/agent/scripts/run-once.sh
+User=youruser
+
+# The agent only ever needs its own directory and the network.
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/path/to/repo/agent
+NoNewPrivileges=true

@@ -241,6 +241,89 @@ python -m research_agent NVDA | jq -r '.decision'
 Everything human-facing — the session clock, what the model proposed, every
 guardrail adjustment and veto, the order id — goes to `stderr`.
 
+## Running it on a schedule
+
+`scripts/run-once.sh` is one pass over a watchlist, built to be pointed at a
+scheduler. It holds a lock so a slow run never overlaps the next tick, keeps its
+own working directory, appends every decision to a per-day audit log, and
+refuses to start if it cannot find credentials.
+
+```bash
+# Dry run over two symbols — decides and logs, submits nothing.
+SYMBOLS="NVDA AAPL" scripts/run-once.sh
+
+# The same pass, actually placing orders.
+SYMBOLS="NVDA AAPL" EXECUTE=1 scripts/run-once.sh
+```
+
+It writes two files per trading day under `logs/`:
+
+| File | Contents |
+|---|---|
+| `decisions-YYYY-MM-DD.jsonl` | one decision object per line — the audit trail |
+| `agent-YYYY-MM-DD.log` | the reasoning: session clock, guardrail vetoes, order ids |
+
+```bash
+jq -r 'select(.decision != "NO_TRADE")' logs/decisions-*.jsonl   # what it traded
+grep VETO logs/agent-*.log                                       # and what it refused
+```
+
+### cron
+
+`scripts/crontab.example` is ready to paste into `crontab -e` after editing the
+paths:
+
+```cron
+CRON_TZ=America/New_York
+*/15 9-15 * * 1-5  SYMBOLS="NVDA" EXECUTE=1 /path/to/agent/scripts/run-once.sh
+0    16   * * 1-5  SYMBOLS="NVDA" EXECUTE=1 /path/to/agent/scripts/run-once.sh
+```
+
+`CRON_TZ` makes the schedule Eastern, so it follows the market rather than your
+machine and survives daylight saving. It works on Vixie cron (Debian, Ubuntu)
+and cronie (RHEL, Fedora); if yours lacks it, convert the hours to UTC by hand
+and revisit them twice a year.
+
+### systemd
+
+`scripts/research-agent.service` and `.timer` do the same job with a real
+timezone-aware calendar and `Persistent=true`, so a machine asleep at the tick
+runs once on waking instead of silently skipping:
+
+```bash
+sudo cp scripts/research-agent.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now research-agent.timer
+systemctl list-timers research-agent    # confirm the next firing
+journalctl -u research-agent -f         # watch it run
+```
+
+### What a schedule costs
+
+Each pass makes one Claude call per symbol. Every 15 minutes through a session
+is 27 calls per symbol per day. **Off-hours firings are free**: when the clock
+says the market is shut, the agent emits its NO_TRADE without calling the model
+at all, so holidays, half-days and a stray weekend tick cost nothing.
+
+### Things that bite scheduled bots
+
+* **Run it dry for a few days first.** Same schedule, no `EXECUTE=1`. Read
+  `decisions-*.jsonl` and satisfy yourself that you agree with the calls before
+  any of them reach the broker.
+* **The working directory matters.** The kill-switch latch (`.killswitch.json`)
+  and `.env` live beside the agent. `run-once.sh` cd's there itself, so always
+  invoke the script rather than `python -m research_agent` from a scheduler.
+* **cron's environment is nearly empty.** No `PATH` to speak of, no shell
+  profile, no virtualenv. Set `PYTHON=/path/to/venv/bin/python` if you use one.
+* **Nothing supervises the market between ticks.** A 15-minute cadence means a
+  position can move a long way unobserved. The bracket stop is what protects
+  you between runs, not the schedule.
+* **The kill-switch is per trading day, and it latches.** After a 3% down day
+  the remaining ticks are no-ops by design. That is the feature working; do not
+  reset it just to get the bot trading again.
+* **Nothing here reconciles fills.** The agent reads positions fresh each run,
+  so it recovers on its own, but no run tells you a bracket stop got hit
+  overnight. Watch the broker, not only the logs.
+
 ### The output contract
 
 ```json
@@ -323,7 +406,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-249 tests, no network and no API key required. The suite is mostly about the
+252 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -347,6 +430,9 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/broker.py` | Account, clock, orders, and the paper-endpoint guard |
 | `research_agent/execution.py` | Reconciles the decision with the open position |
 | `research_agent/cli.py` | Entry point |
+| `scripts/run-once.sh` | One scheduled pass over a watchlist, with locking and logs |
+| `scripts/crontab.example` | Ready-to-edit cron schedule |
+| `scripts/research-agent.{service,timer}` | systemd equivalents |
 
 ## Before you point this at anything
 

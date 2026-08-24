@@ -17,3 +17,7 @@ venv/
 
 # Kill-switch latch state (per-machine, not shared)
 .killswitch.json
+
+# Scheduled run artefacts
+agent/logs/
+agent/.run.lock

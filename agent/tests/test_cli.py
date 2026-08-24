@@ -7,11 +7,37 @@ from pathlib import Path
 
 import pytest
 
-from research_agent import cli, llm
+from research_agent import cli, llm, research
 from research_agent.llm import ModelOutcome
+from research_agent.research import SessionState
 from research_agent.schema import TradeDecision, no_trade
+from tests.conftest import et
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "sample_bars.csv")
+
+
+def _session(open_now: bool) -> SessionState:
+    return SessionState(
+        now_et=et(2026, 3, 2, 11, 0),
+        within_spec_window=open_now,
+        broker_says_open=open_now,
+        detail="forced open" if open_now else "forced closed",
+    )
+
+
+@pytest.fixture(autouse=True)
+def market_open(monkeypatch):
+    """Pin the session clock.
+
+    Without this the CLI reads the wall clock, so the whole file would pass on
+    a Tuesday afternoon and fail on a Saturday.
+    """
+    monkeypatch.setattr(research, "evaluate_session", lambda *a, **k: _session(True))
+
+
+@pytest.fixture
+def market_closed(monkeypatch):
+    monkeypatch.setattr(research, "evaluate_session", lambda *a, **k: _session(False))
 
 
 def stub_model(decision: TradeDecision):
@@ -113,3 +139,50 @@ def test_offline_runs_are_not_halted_by_a_missing_baseline(monkeypatch, capsys):
     assert code == 0
     assert "kill-switch] ok" in out.err
     assert json.loads(out.out)["decision"] == "BUY"
+
+
+def test_a_closed_market_skips_the_model_call(monkeypatch, capsys, market_closed):
+    """A schedule that fires on a holiday must not pay for a decision."""
+    called = []
+
+    def _never(brief, settings, client=None):
+        called.append(brief.symbol)
+        return ModelOutcome(decision=no_trade("TEST", "should not happen"))
+
+    monkeypatch.setattr(cli, "propose_decision", _never)
+    code = cli.main(
+        ["TEST", "--offline", FIXTURE, "--portfolio-value", "100000",
+         "--env-file", "/nonexistent"]
+    )
+    out = capsys.readouterr()
+
+    assert code == 0
+    assert called == []  # the expensive part never ran
+    payload = json.loads(out.out)
+    assert payload["decision"] == "NO_TRADE"
+    assert "not in its regular session" in payload["reasoning"]
+    assert "skipped: market closed" in out.err
+
+
+def test_compact_output_is_one_line(monkeypatch, capsys):
+    code, out = run(
+        monkeypatch, capsys,
+        TradeDecision(decision="BUY", symbol="TEST", qty=20, reasoning="x", confidence="HIGH"),
+        argv=["TEST", "--offline", FIXTURE, "--portfolio-value", "100000",
+              "--env-file", "/nonexistent", "--compact"],
+    )
+    assert code == 0
+    assert out.out.strip().count("\n") == 0
+    assert json.loads(out.out)["decision"] == "BUY"
+
+
+def test_compact_applies_to_failure_output(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "propose_decision", stub_model(no_trade("TEST", "x")))
+    code = cli.main(
+        ["TEST", "--offline", "/nonexistent.csv", "--portfolio-value", "100000",
+         "--env-file", "/nonexistent", "--compact"]
+    )
+    out = capsys.readouterr()
+    assert code == 1
+    assert out.out.strip().count("\n") == 0
+    assert json.loads(out.out)["decision"] == "NO_TRADE"

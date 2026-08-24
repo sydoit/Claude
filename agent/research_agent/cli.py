@@ -86,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="clear a tripped kill-switch and exit, re-arming it for today",
     )
+    p.add_argument(
+        "--compact",
+        action="store_true",
+        help="emit the decision as one JSON line, for appending to a log",
+    )
     p.add_argument("--env-file", default=".env", help="path to the .env file")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return p
@@ -221,7 +226,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         # Unreadable file, malformed payload, thin history, bad credentials:
         # Cannot research it -> cannot judge it -> do not trade it.
         decision = no_trade(symbol, f"No trade: could not assemble market research ({exc}).")
-        print(decision.to_json())
+        print(decision.to_json(indent=None if args.compact else 2))
         print(f"[error] {exc}", file=sys.stderr)
         return 1
 
@@ -253,6 +258,22 @@ def main(argv: Optional[list[str]] = None) -> int:
                 file=sys.stderr,
             )
 
+    indent = None if args.compact else 2
+
+    # Nothing can be acted on outside the session — not even an exit — so the
+    # clock alone settles it. Skipping the model here is what keeps a schedule
+    # that fires on holidays and half-days from costing anything.
+    if not brief.session.is_tradeable:
+        print(
+            no_trade(
+                symbol,
+                f"No trade: the market is not in its regular session "
+                f"({brief.session.detail}).",
+            ).to_json(indent=indent)
+        )
+        print("[model] skipped: market closed, no call made", file=sys.stderr)
+        return 0
+
     outcome = propose_decision(brief, settings)
     if outcome.failed:
         print(f"[model] {outcome.error}", file=sys.stderr)
@@ -276,7 +297,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"[guardrail] VETO: {veto}", file=sys.stderr)
 
     # The spec's contract: exactly this object, on stdout, always.
-    print(result.decision.to_json())
+    print(result.decision.to_json(indent=indent))
 
     if not result.approved:
         return 0

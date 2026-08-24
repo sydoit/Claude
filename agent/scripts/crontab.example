@@ -1,0 +1,19 @@
+# Scheduled runs for the market research agent.
+# Install with:  crontab -e   (then paste, editing the paths)
+#
+# CRON_TZ makes the schedule Eastern, so it follows the market rather than
+# your machine's timezone and survives daylight-saving shifts. It is supported
+# by Vixie cron (Debian/Ubuntu) and cronie (RHEL/Fedora). If your cron does not
+# support it, convert the hours to UTC by hand and revisit them twice a year.
+CRON_TZ=America/New_York
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# Every 15 minutes through the regular session, weekdays only.
+# The agent refuses to trade outside 09:30-16:00 ET anyway, and skips the
+# model call entirely when the market is shut, so a stray firing is cheap.
+*/15 9-15 * * 1-5  SYMBOLS="NVDA AAPL" EXECUTE=1 /path/to/repo/agent/scripts/run-once.sh
+0    16   * * 1-5  SYMBOLS="NVDA AAPL" EXECUTE=1 /path/to/repo/agent/scripts/run-once.sh
+
+# Drop EXECUTE=1 to run the same schedule as a dry run first. Do that for a
+# few days and read logs/decisions-*.jsonl before letting it place anything.
