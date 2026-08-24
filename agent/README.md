@@ -304,11 +304,62 @@ is 27 calls per symbol per day. **Off-hours firings are free**: when the clock
 says the market is shut, the agent emits its NO_TRADE without calling the model
 at all, so holidays, half-days and a stray weekend tick cost nothing.
 
+### Reading a dry run
+
+Run the schedule with `EXECUTE=1` omitted for a few days, then read it back:
+
+```bash
+python -m research_agent.review logs/
+```
+
+```
+Dry run review - 2026-03-02 to 2026-03-06
+5 session(s), 135 pass(es), 270 decision(s)
+Mode: dry run x135
+
+DECISIONS
+  NO_TRADE     237   87.8%  #####################...
+  SELL          21    7.8%  ##......................
+  BUY           12    4.4%  #.......................
+
+TRADES IT WANTED TO PLACE (33)
+  2026-03-02  BUY     216 NVDA   HIGH   NVDA is trending above its 20-day average...
+
+GUARDRAIL VETOES (80)
+     28  daily drawdown kill-switch is tripped (KILL SWITCH TRIPPED - day P&L # ...
+     24  RSI # is overbought and a BUY adds to that extreme rather than fading it
+     17  confidence LOW is below the required MEDIUM
+     11  risk limits leave room for # shares (binding constraint: correlation cluster cap)
+
+KILL-SWITCH DAYS (1)
+  2026-03-04  KILL SWITCH TRIPPED - day P&L -3,410.00 (-3.41%) against a 3.00% limit
+```
+
+It separates the two kinds of NO_TRADE, which answer different questions:
+**guardrail vetoes** tell you whether your limits are set sensibly, while
+**stood down on its own** tells you whether the model is being usefully
+selective or simply timid. Reasons are grouped by flattening the numbers out of
+them, so forty variations of "RSI 74.3 is overbought" count as one line.
+
+`--json` emits the same summary as data, for tracking across weeks.
+
+Three questions worth answering before switching `EXECUTE` on:
+
+1. **Do you agree with the trades?** Every one it wanted to place is listed with
+   its reasoning and size. If you would not have taken them by hand, the model
+   or the prompt needs work — not the caps.
+2. **Did the vetoes fire for reasons you accept?** A long tail of
+   `confidence LOW` means the model is unsure and the floor is doing its job. A
+   long tail of `cluster cap` means your watchlist is really one bet.
+3. **Was anything silently broken?** Check the error count and that the pass
+   count matches what you scheduled. Zero trades across a week is a result, but
+   it might also be a misconfiguration.
+
 ### Things that bite scheduled bots
 
-* **Run it dry for a few days first.** Same schedule, no `EXECUTE=1`. Read
-  `decisions-*.jsonl` and satisfy yourself that you agree with the calls before
-  any of them reach the broker.
+* **Run it dry for a few days first.** Same schedule, no `EXECUTE=1`, then
+  `python -m research_agent.review logs/`. Satisfy yourself that you agree with
+  the calls before any of them reach the broker.
 * **The working directory matters.** The kill-switch latch (`.killswitch.json`)
   and `.env` live beside the agent. `run-once.sh` cd's there itself, so always
   invoke the script rather than `python -m research_agent` from a scheduler.
@@ -406,7 +457,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-252 tests, no network and no API key required. The suite is mostly about the
+272 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -430,6 +481,7 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/broker.py` | Account, clock, orders, and the paper-endpoint guard |
 | `research_agent/execution.py` | Reconciles the decision with the open position |
 | `research_agent/cli.py` | Entry point |
+| `research_agent/review.py` | Reads scheduled runs back so a dry run can be judged |
 | `scripts/run-once.sh` | One scheduled pass over a watchlist, with locking and logs |
 | `scripts/crontab.example` | Ready-to-edit cron schedule |
 | `scripts/research-agent.{service,timer}` | systemd equivalents |

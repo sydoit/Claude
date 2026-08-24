@@ -39,7 +39,15 @@ if ! flock -n 9; then
 fi
 
 EXECUTE_FLAG=()
-[ -n "${EXECUTE:-}" ] && EXECUTE_FLAG=(--execute)
+MODE="DRY RUN"
+if [ -n "${EXECUTE:-}" ]; then
+    EXECUTE_FLAG=(--execute)
+    MODE="EXECUTING"
+fi
+
+# A decision object looks the same whether or not it was acted on, so the mode
+# has to be recorded here or the audit trail cannot tell you which it was.
+echo "$(date -Is) === pass start [$MODE] symbols: $SYMBOLS ===" >> "$DIARY"
 
 status=0
 for symbol in $SYMBOLS; do
