@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Refuse to commit a live-looking credential in a tracked file.
+# Install once with:  git config core.hooksPath .githooks
+set -uo pipefail
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# sk-ant-… (Anthropic), PK…/AK… + 40-char secret (Alpaca).
+pattern='(sk-ant-[A-Za-z0-9_-]{20,}|^[A-Z_]*KEY_ID=(PK|AK)[A-Z0-9]{10,}|^[A-Z_]*SECRET_KEY=[A-Za-z0-9/+]{30,})'
+
+hits=0
+for file in $staged; do
+    case "$file" in .githooks/*) continue ;; esac
+    if git show ":$file" 2>/dev/null | grep -nEq "$pattern"; then
+        echo "refusing to commit: $file looks like it contains a live credential" >&2
+        git show ":$file" | grep -nE "$pattern" | sed -E 's/(.{0,24}).*/  \1…/' >&2
+        hits=1
+    fi
+done
+
+if [ $hits -ne 0 ]; then
+    cat >&2 <<'MSG'
+
+Real keys belong in .env, which is gitignored. .env.example is a template.
+If this is genuinely a placeholder, commit again with --no-verify.
+MSG
+    exit 1
+fi
+exit 0
