@@ -6,3 +6,11 @@
 # MetaEditor / terminal artefacts
 MQL5/Logs/
 *.bak
+
+# Python agent
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
