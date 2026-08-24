@@ -42,6 +42,7 @@ class RiskPolicy:
     """The hard limits. These are enforced in code; the prompt only echoes them."""
 
     max_risk_pct: float = 0.02
+    max_portfolio_risk_pct: float = 0.06
     max_position_pct: float = 0.25
     stop_atr_mult: float = 1.5
     take_profit_r: float = 2.0
@@ -62,6 +63,17 @@ class RiskPolicy:
                 f"max_risk_pct must be in (0, 0.02]; the spec caps single-trade "
                 f"risk at 2% of portfolio value, got {self.max_risk_pct!r}"
             )
+        if not 0 < self.max_portfolio_risk_pct <= 1:
+            raise ConfigError(
+                "max_portfolio_risk_pct must be in (0, 1], got "
+                f"{self.max_portfolio_risk_pct!r}"
+            )
+        if self.max_portfolio_risk_pct < self.max_risk_pct:
+            raise ConfigError(
+                f"max_portfolio_risk_pct ({self.max_portfolio_risk_pct:.2%}) is "
+                f"below max_risk_pct ({self.max_risk_pct:.2%}), which would make "
+                "even a single full-size trade impossible"
+            )
         if not 0 < self.max_position_pct <= 1:
             raise ConfigError("max_position_pct must be in (0, 1]")
         if self.stop_atr_mult <= 0:
@@ -79,6 +91,7 @@ class RiskPolicy:
     def from_env(cls) -> "RiskPolicy":
         return cls(
             max_risk_pct=_env_float("MAX_RISK_PCT", 0.02),
+            max_portfolio_risk_pct=_env_float("MAX_PORTFOLIO_RISK_PCT", 0.06),
             max_position_pct=_env_float("MAX_POSITION_PCT", 0.25),
             stop_atr_mult=_env_float("STOP_ATR_MULT", 1.5),
             take_profit_r=_env_float("TAKE_PROFIT_R", 2.0),

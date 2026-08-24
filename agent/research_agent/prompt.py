@@ -37,6 +37,12 @@ anything is submitted, using these definitions:
   is additionally capped at {policy.max_position_pct:.0%} of portfolio value and
   by available buying power. If your quantity exceeds any cap it is reduced to
   the cap, not rejected — but propose a number that already fits.
+- **Portfolio risk** is the sum of that same measure across every open
+  position, and it may not exceed {policy.max_portfolio_risk_pct:.2%} of
+  portfolio value. The brief lists what is already committed and how much
+  headroom is left; a position with no working stop counts its full notional.
+  Your trade is sized into the headroom that remains, so when the book is
+  already loaded the honest answer is often NO_TRADE.
 - **RSI extremes** are RSI({policy.rsi_period}) >= {policy.rsi_overbought:g} or
   <= {policy.rsi_oversold:g}. Inside an extreme, only a *contrarian* trade is
   permitted — SELL into overbought, BUY into oversold — and only at HIGH

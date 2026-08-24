@@ -9,6 +9,7 @@ The model proposes. This layer disposes.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -127,32 +128,71 @@ def review(
                 f"{zone.lower()} RSI {brief.rsi:.1f}"
             )
 
-    # Rule: never risk more than 2% of portfolio value on a single trade.
-    plan: Optional[SizingPlan] = None
-    try:
-        plan = plan_size(
-            side="buy" if proposed.decision == "BUY" else "sell",
-            entry_price=brief.reference_price,
-            atr_value=brief.atr,
-            portfolio_value=brief.portfolio_value,
-            buying_power=brief.buying_power,
-            policy=policy,
+    # A trade that runs against an open position takes risk off the book. It is
+    # capped only by what is actually held: entry-side limits must never stand
+    # between the account and the exit.
+    pos = brief.open_position
+    reducing = bool(
+        pos is not None
+        and pos.qty != 0
+        and (
+            (proposed.decision == "SELL" and pos.is_long)
+            or (proposed.decision == "BUY" and pos.is_short)
         )
-    except SizingError as exc:
-        vetoes.append(f"cannot size the position: {exc}")
+    )
 
+    plan: Optional[SizingPlan] = None
     final_qty = proposed.qty
-    if plan is not None:
-        allowed = plan.max_qty
 
-        # Adding to an existing position in the same direction consumes the same
-        # concentration budget, so net it off before sizing the new clip.
-        pos = brief.open_position
-        if pos is not None and pos.qty != 0:
-            same_way = (proposed.decision == "BUY" and pos.is_long) or (
-                proposed.decision == "SELL" and pos.is_short
+    if reducing:
+        held = int(abs(pos.qty))
+        if proposed.qty is None or proposed.qty > held:
+            adjustments.append(
+                f"qty clamped from {proposed.qty if proposed.qty is not None else 'null'} "
+                f"to {held}: cannot reduce more than the {held} shares held"
             )
-            if same_way:
+            final_qty = float(held)
+        else:
+            final_qty = float(int(proposed.qty))
+        if final_qty < 1:
+            vetoes.append("proposed qty rounds to 0 whole shares")
+    else:
+        # Rule: never risk more than 2% of portfolio value on a single trade.
+        try:
+            plan = plan_size(
+                side="buy" if proposed.decision == "BUY" else "sell",
+                entry_price=brief.reference_price,
+                atr_value=brief.atr,
+                portfolio_value=brief.portfolio_value,
+                buying_power=brief.buying_power,
+                policy=policy,
+            )
+        except SizingError as exc:
+            vetoes.append(f"cannot size the position: {exc}")
+
+        if plan is not None:
+            allowed = plan.max_qty
+            binding = plan.binding_constraint
+
+            # Rule: the whole book, not just this trade. Risk already committed
+            # to open positions is subtracted before this one is sized.
+            if brief.exposure is not None:
+                headroom = brief.exposure.headroom(policy)
+                by_portfolio = math.floor(headroom / plan.stop_distance)
+                if by_portfolio < allowed:
+                    allowed = by_portfolio
+                    binding = "portfolio risk cap"
+                    adjustments.append(
+                        f"portfolio already risks "
+                        f"{brief.exposure.total_risk:,.2f} "
+                        f"({brief.exposure.risk_pct():.2%} of "
+                        f"{policy.max_portfolio_risk_pct:.2%} cap); "
+                        f"{headroom:,.2f} of risk budget left"
+                    )
+
+            # Adding to an existing position in the same direction consumes the
+            # same concentration budget, so net it off before sizing the clip.
+            if pos is not None and pos.qty != 0:
                 room = allowed - abs(pos.qty)
                 if room < allowed:
                     adjustments.append(
@@ -161,22 +201,23 @@ def review(
                     )
                 allowed = room
 
-        allowed = int(max(allowed, 0))
-        if allowed < 1:
-            vetoes.append(
-                f"risk limits leave room for 0 shares "
-                f"(binding constraint: {plan.binding_constraint})"
-            )
-        elif proposed.qty is None or proposed.qty > allowed:
-            adjustments.append(
-                f"qty clamped from {proposed.qty if proposed.qty is not None else 'null'} "
-                f"to {allowed} by the {plan.binding_constraint}"
-            )
-            final_qty = float(allowed)
-        else:
-            final_qty = float(int(proposed.qty))
-            if final_qty < 1:
-                vetoes.append("proposed qty rounds to 0 whole shares")
+            allowed = int(max(allowed, 0))
+            if allowed < 1:
+                vetoes.append(
+                    f"risk limits leave room for 0 shares "
+                    f"(binding constraint: {binding})"
+                )
+            elif proposed.qty is None or proposed.qty > allowed:
+                adjustments.append(
+                    f"qty clamped from "
+                    f"{proposed.qty if proposed.qty is not None else 'null'} "
+                    f"to {allowed} by the {binding}"
+                )
+                final_qty = float(allowed)
+            else:
+                final_qty = float(int(proposed.qty))
+                if final_qty < 1:
+                    vetoes.append("proposed qty rounds to 0 whole shares")
 
     if vetoes:
         return _veto(proposed, vetoes, adjustments)

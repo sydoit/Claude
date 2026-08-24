@@ -27,6 +27,7 @@ confident answer built on a stale quote. So every hard rule exists twice:
 | Rule | Told to Claude | Enforced in code |
 |---|---|---|
 | Never risk >2% of portfolio on one trade | system prompt | `sizing.py` + `guardrails.py` — qty is clamped to the cap |
+| Never risk >6% across the whole book | system prompt | `portfolio.py` — open risk is measured and subtracted before sizing |
 | No trading at RSI ≥70 / ≤30 without a strong contrarian reason | system prompt | `guardrails.py` — momentum trades into an extreme are vetoed outright |
 | Regular market hours only (9:30–16:00 ET) | system prompt | `research.py` clock + broker calendar; outside it, vetoed |
 | If uncertain, default to NO_TRADE | system prompt | every failure path — API error, refusal, bad schema, unreadable data — returns NO_TRADE |
@@ -47,8 +48,41 @@ stop distance = 1.5 × ATR(14)
 max qty       = floor(risk budget ÷ stop distance)
 ```
 
-Two further ceilings apply, and the tightest of the three wins: a position
-concentration cap (25% of portfolio value by default) and available buying power.
+Two further ceilings apply, and the tightest wins: a position concentration
+cap (25% of portfolio value by default) and available buying power.
+
+## What the portfolio-level cap adds
+
+The per-trade cap says nothing about how many trades are open at once — ten
+positions at 2% each is 20% of the account on the table. So before sizing a new
+trade, the agent measures what is already at stake and sizes into what is left:
+
+```
+open risk = Σ over positions of qty × |current price − working stop|
+headroom  = portfolio_value × 6%  −  open risk
+max qty   = floor(headroom ÷ stop distance)
+```
+
+Open risk is read from the account itself — live positions joined against their
+working stop orders — not from anything this bot remembers between runs. It is
+therefore correct even for positions you opened by hand, and correct after a
+restart.
+
+**A position with no working stop counts its entire notional as at risk.** There
+is no measurable floor under it, so there is no honest smaller number, and one
+unprotected position will generally exhaust the budget and block new entries
+until you attach a stop. That is the intended behaviour rather than a rough
+edge; the run says so loudly on `stderr`.
+
+Where several stops protect one position, the tightest one binds. A stop that
+has trailed past break-even reports zero risk, not negative.
+
+### Reducing is never blocked
+
+Every cap above governs *entries*. A trade that runs against an open position —
+selling a long, covering a short — takes risk off the book and is limited only
+by what you actually hold. A full exit stays available precisely when the
+portfolio cap is breached, which is when you are most likely to need it.
 
 Because sizing assumes you exit at the stop, the order is only honest if that
 stop actually exists — so entries are submitted as **bracket orders** with the
@@ -153,6 +187,7 @@ Everything in `.env`; the defaults are the spec's numbers.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MAX_RISK_PCT` | `0.02` | Risk cap per trade. **Values above 0.02 are rejected at startup.** |
+| `MAX_PORTFOLIO_RISK_PCT` | `0.06` | Aggregate risk cap across every open position. Must be ≥ `MAX_RISK_PCT`. |
 | `MAX_POSITION_PCT` | `0.25` | Notional concentration cap |
 | `STOP_ATR_MULT` | `1.5` | Stop distance in ATRs — this is what sets position size |
 | `TAKE_PROFIT_R` | `2.0` | Target distance, in multiples of the stop distance |
@@ -174,7 +209,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-138 tests, no network and no API key required. The suite is mostly about the
+166 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -191,6 +226,7 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/prompt.py` | The system prompt — the spec verbatim, then framed |
 | `research_agent/llm.py` | The Claude call; every failure resolves to NO_TRADE |
 | `research_agent/sizing.py` | Risk budget → share count |
+| `research_agent/portfolio.py` | Measures risk already open across the book |
 | `research_agent/guardrails.py` | Re-checks every rule; vetoes or clamps |
 | `research_agent/broker.py` | Account, clock, orders, and the paper-endpoint guard |
 | `research_agent/execution.py` | Reconciles the decision with the open position |
@@ -206,8 +242,9 @@ including that the stop is attached and that the live endpoint is refused.
 * **The model is non-deterministic.** The same brief can produce different
   decisions on different runs. The guardrails are deterministic; the reasoning
   is not.
-* **No portfolio-level risk management.** The 2% cap is per trade. Ten
-  simultaneous trades at 2% is 20% at risk, and nothing here stops that.
+* **The caps are per-symbol and per-book, not per-strategy.** Correlated
+  positions are counted separately even when they would all fail together; six
+  semiconductor longs at 1% each read as 6% of diversified risk, and are not.
 * **Rate limits and data quality.** The free `iex` feed is thinner than `sip`.
   A wide or stale quote produces worse sizing, which is why stale quotes are
   vetoed outright.

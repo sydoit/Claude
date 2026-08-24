@@ -48,6 +48,16 @@ class Position:
     qty: float  # signed: negative means short
     avg_entry_price: float
     market_value: float
+    current_price: float = 0.0
+
+    @property
+    def price(self) -> float:
+        """Live price, falling back to whatever the market value implies."""
+        if self.current_price > 0:
+            return self.current_price
+        if self.qty:
+            return abs(self.market_value / self.qty)
+        return self.avg_entry_price
 
     @property
     def is_long(self) -> bool:
@@ -56,6 +66,21 @@ class Position:
     @property
     def is_short(self) -> bool:
         return self.qty < 0
+
+
+@dataclass(frozen=True)
+class OpenOrder:
+    id: str
+    symbol: str
+    side: str
+    qty: float
+    order_type: str
+    stop_price: Optional[float]
+    status: str
+
+    @property
+    def is_stop(self) -> bool:
+        return self.order_type in {"stop", "stop_limit", "trailing_stop"}
 
 
 @dataclass(frozen=True)
@@ -105,12 +130,28 @@ class AlpacaBroker:
             if exc.status == 404:  # no open position — the normal case
                 return None
             raise
-        return Position(
-            symbol=p.get("symbol", symbol),
-            qty=float(p.get("qty", 0) or 0),
-            avg_entry_price=float(p.get("avg_entry_price", 0) or 0),
-            market_value=float(p.get("market_value", 0) or 0),
-        )
+        return _position(p, symbol)
+
+    def positions(self) -> list[Position]:
+        """Every open position. The portfolio risk cap is measured over these."""
+        rows = self._http.trading_get("/v2/positions") or []
+        return [_position(r, r.get("symbol", "")) for r in rows]
+
+    def open_orders(self) -> list[OpenOrder]:
+        """Open orders, with bracket legs flattened into the same list.
+
+        A filled bracket entry leaves its stop leg working as an open order, so
+        this is how we discover what protection each position actually has.
+        """
+        rows = self._http.trading_get(
+            "/v2/orders", {"status": "open", "nested": "true", "limit": 500}
+        ) or []
+        out: list[OpenOrder] = []
+        for row in rows:
+            out.append(_open_order(row))
+            for leg in row.get("legs") or []:
+                out.append(_open_order(leg))
+        return out
 
     # --- write ----------------------------------------------------------------
     def _assert_paper(self) -> None:
@@ -171,6 +212,29 @@ class AlpacaBroker:
             "client_order_id": client_order_id,
         }
         return _order_result(self._http.trading_post("/v2/orders", body))
+
+
+def _position(p: Any, symbol: str) -> Position:
+    return Position(
+        symbol=p.get("symbol", symbol),
+        qty=float(p.get("qty", 0) or 0),
+        avg_entry_price=float(p.get("avg_entry_price", 0) or 0),
+        market_value=float(p.get("market_value", 0) or 0),
+        current_price=float(p.get("current_price", 0) or 0),
+    )
+
+
+def _open_order(p: Any) -> OpenOrder:
+    raw_stop = p.get("stop_price")
+    return OpenOrder(
+        id=str(p.get("id", "")),
+        symbol=str(p.get("symbol", "")),
+        side=str(p.get("side", "")),
+        qty=float(p.get("qty", 0) or 0),
+        order_type=str(p.get("type", "")),
+        stop_price=float(raw_stop) if raw_stop not in (None, "") else None,
+        status=str(p.get("status", "")),
+    )
 
 
 def _whole(qty: float) -> int:

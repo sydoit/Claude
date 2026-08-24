@@ -10,6 +10,7 @@ from .broker import Account, MarketClock, Position
 from .config import MARKET_TZ, RiskPolicy
 from .indicators import Bar, InsufficientData, atr, pct_change, rsi, sma
 from .market_data import Headline, MarketDataProvider, Quote
+from .portfolio import PortfolioExposure
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class ResearchBrief:
     portfolio_value: float
     buying_power: float
     open_position: Optional[Position]
+    exposure: Optional[PortfolioExposure] = None
     headlines: Sequence[Headline] = field(default_factory=tuple)
     warnings: Sequence[str] = field(default_factory=tuple)
 
@@ -149,6 +151,13 @@ class ResearchBrief:
             f"  Risk budget for this trade ({policy.max_risk_pct:.2%} of portfolio):"
             f" {self.portfolio_value * policy.max_risk_pct:,.2f}",
         ]
+        if self.exposure is not None:
+            lines += ["", "PORTFOLIO RISK ALREADY OPEN"]
+            lines += self.exposure.describe(policy)
+            lines.append(
+                f"  Headroom for a new trade: "
+                f"{self.exposure.headroom(policy):,.2f}"
+            )
         if self.headlines:
             lines += ["", "RECENT HEADLINES"]
             lines += [
@@ -169,6 +178,7 @@ def build_brief(
     account: Account,
     position: Optional[Position],
     clock: Optional[MarketClock],
+    exposure: Optional[PortfolioExposure] = None,
     timeframe: str = "1Day",
     bar_limit: int = 120,
     news_limit: int = 6,
@@ -190,6 +200,13 @@ def build_brief(
     if age > policy.max_quote_age_seconds:
         warnings.append(
             f"latest quote is {age:.0f}s old (limit {policy.max_quote_age_seconds}s)"
+        )
+
+    if exposure is not None and exposure.unprotected:
+        names = ", ".join(p.symbol for p in exposure.unprotected)
+        warnings.append(
+            f"open positions with no working stop ({names}); their full notional "
+            f"counts against the portfolio risk cap"
         )
 
     def maybe(fn, *args, **kwargs):
@@ -220,6 +237,7 @@ def build_brief(
         portfolio_value=account.portfolio_value,
         buying_power=account.buying_power,
         open_position=position,
+        exposure=exposure,
         headlines=tuple(provider.news(symbol, limit=news_limit)),
         warnings=tuple(warnings),
     )

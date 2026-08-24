@@ -9,6 +9,7 @@ from research_agent.broker import Account, MarketClock, Position
 from research_agent.config import MARKET_TZ, RiskPolicy
 from research_agent.indicators import Bar
 from research_agent.market_data import FixtureMarketData, Quote
+from research_agent.portfolio import PortfolioExposure, assess
 from research_agent.research import ResearchBrief, build_brief
 
 BASE = datetime(2026, 3, 2, 14, 0, tzinfo=timezone.utc)  # a Monday, 09:00 ET
@@ -73,6 +74,7 @@ def make_brief(
     now: Optional[datetime] = None,
     market_open: Optional[bool] = True,
     quote_age_seconds: float = 1.0,
+    exposure: Optional[PortfolioExposure] = None,
     symbol: str = "TEST",
 ) -> ResearchBrief:
     policy = policy or RiskPolicy()
@@ -105,5 +107,6 @@ def make_brief(
         account=account,
         position=position,
         clock=clock,
+        exposure=exposure,
         now=now,
     )

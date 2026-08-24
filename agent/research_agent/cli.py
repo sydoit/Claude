@@ -21,6 +21,7 @@ from .guardrails import review
 from .indicators import InsufficientData
 from .llm import propose_decision
 from .market_data import FixtureMarketData
+from .portfolio import assess_from_broker
 from .research import build_brief
 from .schema import no_trade
 
@@ -139,6 +140,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         account, clock = _resolve_account_and_clock(args, broker)
         position = broker.position(symbol) if broker else None
+        exposure = (
+            assess_from_broker(broker, account.portfolio_value) if broker else None
+        )
 
         brief = build_brief(
             symbol,
@@ -147,6 +151,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             account=account,
             position=position,
             clock=clock,
+            exposure=exposure,
             timeframe=args.timeframe,
             bar_limit=args.bars,
         )
@@ -159,6 +164,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     print(f"[research] {brief.session.detail}", file=sys.stderr)
+    if brief.exposure is not None and brief.exposure.positions:
+        print(
+            f"[research] portfolio risk {brief.exposure.total_risk:,.2f} "
+            f"({brief.exposure.risk_pct():.2%} of the "
+            f"{settings.risk.max_portfolio_risk_pct:.2%} cap), headroom "
+            f"{brief.exposure.headroom(settings.risk):,.2f}",
+            file=sys.stderr,
+        )
+        for unprotected in brief.exposure.unprotected:
+            print(
+                f"[research] WARNING: {unprotected.symbol} has no working stop; "
+                f"its full {unprotected.risk_amount:,.2f} notional counts as at risk",
+                file=sys.stderr,
+            )
 
     outcome = propose_decision(brief, settings)
     if outcome.failed:
