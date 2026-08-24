@@ -48,7 +48,15 @@ class Headline:
 
 
 class MarketDataProvider(Protocol):
-    def bars(self, symbol: str, *, timeframe: str, limit: int) -> list[Bar]: ...
+    def bars(
+        self,
+        symbol: str,
+        *,
+        timeframe: str,
+        limit: int,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> list[Bar]: ...
     def latest_quote(self, symbol: str) -> Quote: ...
     def news(self, symbol: str, *, limit: int) -> list[Headline]: ...
 
@@ -59,20 +67,33 @@ class AlpacaMarketData:
     def __init__(self, http: AlpacaHTTP) -> None:
         self._http = http
 
-    def bars(self, symbol: str, *, timeframe: str = "1Day", limit: int = 120) -> list[Bar]:
+    def bars(
+        self,
+        symbol: str,
+        *,
+        timeframe: str = "1Day",
+        limit: int = 120,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> list[Bar]:
         # Ask for a generous window; `limit` trims to the most recent bars.
         span = timedelta(days=limit * 3 if timeframe.endswith("Day") else 10)
-        payload = self._http.data_get(
-            f"/v2/stocks/{symbol}/bars",
-            params={
+        window_start = (
+            start.date().isoformat()
+            if start
+            else (datetime.now(timezone.utc) - span).date().isoformat()
+        )
+        params = {
                 "timeframe": timeframe,
-                "start": (datetime.now(timezone.utc) - span).date().isoformat(),
+                "start": window_start,
                 "limit": limit,
                 "adjustment": "split",
                 "feed": self._http.settings.feed,
                 "sort": "asc",
-            },
-        )
+        }
+        if end is not None:
+            params["end"] = end.date().isoformat()
+        payload = self._http.data_get(f"/v2/stocks/{symbol}/bars", params=params)
         raw = (payload or {}).get("bars") or []
         bars = [
             Bar(
@@ -150,8 +171,21 @@ class FixtureMarketData:
                 )
         return cls(rows, **kwargs)
 
-    def bars(self, symbol: str, *, timeframe: str = "1Day", limit: int = 120) -> list[Bar]:
-        return self._bars[-limit:]
+    def bars(
+        self,
+        symbol: str,
+        *,
+        timeframe: str = "1Day",
+        limit: int = 120,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> list[Bar]:
+        rows = self._bars
+        if start is not None:
+            rows = [b for b in rows if b.ts >= start]
+        if end is not None:
+            rows = [b for b in rows if b.ts <= end]
+        return rows[-limit:]
 
     def latest_quote(self, symbol: str) -> Quote:
         return self._quote

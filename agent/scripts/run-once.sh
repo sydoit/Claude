@@ -22,6 +22,7 @@ LOG_KEEP_DAYS="${LOG_KEEP_DAYS:-90}"
 mkdir -p "$LOG_DIR"
 DAY="$(TZ=America/New_York date +%F)"
 DECISIONS="$LOG_DIR/decisions-$DAY.jsonl"
+JOURNAL="$LOG_DIR/journal-$DAY.jsonl"
 DIARY="$LOG_DIR/agent-$DAY.log"
 
 # The kill-switch latch and .env both live beside this script, so a scheduler
@@ -52,7 +53,8 @@ echo "$(date -Is) === pass start [$MODE] symbols: $SYMBOLS ===" >> "$DIARY"
 status=0
 for symbol in $SYMBOLS; do
     echo "$(date -Is) --- $symbol ---" >> "$DIARY"
-    "$PYTHON" -m research_agent "$symbol" --compact "${EXECUTE_FLAG[@]}" \
+    "$PYTHON" -m research_agent "$symbol" --compact --journal "$JOURNAL" \
+        "${EXECUTE_FLAG[@]}" \
         >> "$DECISIONS" 2>> "$DIARY"
     rc=$?
     # 0 = decided (trade or no-trade). Anything else is worth noticing, but one

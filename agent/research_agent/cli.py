@@ -18,6 +18,7 @@ from .broker import Account, AlpacaBroker, LiveTradingBlocked, MarketClock
 from .config import AgentSettings, ConfigError
 from .execution import ExecutionReport, execute
 from .guardrails import review
+from .journal import append as journal_append, build_record
 from .killswitch import (
     DEFAULT_LATCH_FILE,
     FileLatchStore,
@@ -85,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--reset-kill-switch",
         action="store_true",
         help="clear a tripped kill-switch and exit, re-arming it for today",
+    )
+    p.add_argument(
+        "--journal",
+        metavar="JSONL",
+        help="append a scoreable record of this decision (entry, stop, target)",
     )
     p.add_argument(
         "--compact",
@@ -299,10 +305,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     # The spec's contract: exactly this object, on stdout, always.
     print(result.decision.to_json(indent=indent))
 
+    def journal(report: Optional[ExecutionReport] = None) -> None:
+        if args.journal:
+            journal_append(
+                args.journal,
+                build_record(
+                    brief, result,
+                    proposed_qty=outcome.decision.qty,
+                    proposed_confidence=outcome.decision.confidence,
+                    report=report,
+                ),
+            )
+
     if not result.approved:
+        journal()
         return 0
 
     if broker is None:
+        journal()
         print("[execution] offline mode: nothing submitted.", file=sys.stderr)
         return 0
 
@@ -311,8 +331,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             result.decision, result.plan, brief, broker, dry_run=not args.execute
         )
     except LiveTradingBlocked as exc:
+        journal()
         print(f"[execution] BLOCKED: {exc}", file=sys.stderr)
         return 3
+    journal(report)
     _report(report)
     return 0 if report.action != "failed" else 1
 

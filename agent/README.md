@@ -355,6 +355,82 @@ Three questions worth answering before switching `EXECUTE` on:
    count matches what you scheduled. Zero trades across a week is a result, but
    it might also be a misconfiguration.
 
+Then score them: `python -m research_agent.score logs/`.
+
+### Scoring the outcomes
+
+The review says what the agent decided. Scoring says whether it was right.
+
+```bash
+python -m research_agent.score logs/ --horizon 10 --slippage-bps 5
+```
+
+Every journalled trade is walked forward bar by bar from the first bar *after*
+the decision, asking which came first: the stop or the target. Results are
+reported in **R** — multiples of the risk taken — which is the only unit that
+lets a 110-share trade in a $150 stock be compared with a 40-share trade in a
+$400 one. Risk is 1R by construction, so a 2:1 target is +2R and a stop is −1R.
+
+```
+OVERALL
+                            n     win       avg      total      PF
+  all trades               21     24%    -0.40R     -8.42R    0.49
+
+HOW THEY ENDED
+  hit target                  4   19.0%
+  stopped out                16   76.2%
+  still open at horizon       1    4.8%
+
+BY STATED CONFIDENCE
+  HIGH                      7     43%    +0.25R     +1.78R    1.43
+  MEDIUM                   11     18%    -0.65R     -7.10R    0.24
+  LOW                        3      0%    -1.03R     -3.10R    0.00
+```
+
+**The confidence breakdown is the most useful row in the report.** It asks
+whether the model's own `HIGH` means anything. If HIGH and LOW have the same
+expectancy, the confidence field is noise and `MIN_CONFIDENCE` is filtering on
+nothing. If HIGH is meaningfully better, raising the floor is a real edge and
+the number tells you where to put it.
+
+**Expectancy — average R per trade — is the number that decides whether to go
+live.** Total R flatters a lucky streak; win rate ignores that a 2:1 target
+pays double. A handful of trades is not evidence either way.
+
+#### What this deliberately does not flatter you
+
+Three modelling choices all lean pessimistic, because a scorer that rounds in
+your favour is worse than no scorer:
+
+* **Stop and target in the same bar resolves to the stop.** The intrabar path
+  is unknowable, so the loss is assumed. The report counts how often this
+  happened, under CAVEATS.
+* **Scoring starts at the next bar.** Using the decision's own bar would score
+  against price action that had already happened when the call was made.
+* **Slippage is charged on both entry and exit** via `--slippage-bps`. It is
+  zero by default because the honest number depends on your broker and symbols;
+  5–10bps is a reasonable starting guess for liquid US equities.
+
+And what it is not: **a backtest**. It scores the decisions that were actually
+made on the symbols that were actually watched. It cannot tell you what a
+different watchlist would have done, it does not simulate overlapping positions
+competing for the same capital, and it assumes every order filled at the
+reference price. `--json` emits the same summary as data for tracking over time.
+
+#### Scoring needs the journal
+
+The five-field decision object cannot be scored: it says `BUY 131 NVDA` without
+saying at what price, against what stop, or toward what target. Scheduled runs
+therefore write `journal-YYYY-MM-DD.jsonl` alongside, carrying the full plan.
+`run-once.sh` does this for you; a manual run needs `--journal`:
+
+```bash
+python -m research_agent NVDA --journal logs/journal-$(date +%F).jsonl
+```
+
+Runs from before the journal existed cannot be scored retroactively — there is
+nothing recorded to replay.
+
 ### Things that bite scheduled bots
 
 * **Run it dry for a few days first.** Same schedule, no `EXECUTE=1`, then
@@ -457,7 +533,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-272 tests, no network and no API key required. The suite is mostly about the
+316 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -482,6 +558,9 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/execution.py` | Reconciles the decision with the open position |
 | `research_agent/cli.py` | Entry point |
 | `research_agent/review.py` | Reads scheduled runs back so a dry run can be judged |
+| `research_agent/journal.py` | Records the entry, stop and target a decision was built on |
+| `research_agent/scoring.py` | Replays decisions against the bars that followed |
+| `research_agent/score_cli.py` | The scoring report |
 | `scripts/run-once.sh` | One scheduled pass over a watchlist, with locking and logs |
 | `scripts/crontab.example` | Ready-to-edit cron schedule |
 | `scripts/research-agent.{service,timer}` | systemd equivalents |
