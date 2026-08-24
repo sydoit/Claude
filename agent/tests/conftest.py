@@ -92,6 +92,7 @@ def make_brief(
     quote_age_seconds: float = 1.0,
     exposure: Optional[PortfolioExposure] = None,
     peer_bars: Optional[dict] = None,
+    drawdown: Optional[object] = None,
     symbol: str = "TEST",
 ) -> ResearchBrief:
     policy = policy or RiskPolicy()
@@ -125,6 +126,7 @@ def make_brief(
         position=position,
         clock=clock,
         exposure=exposure,
+        drawdown=drawdown,
         peer_bars=peer_bars,
         now=now,
     )

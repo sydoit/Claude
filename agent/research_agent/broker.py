@@ -40,6 +40,9 @@ class Account:
     equity: float
     trading_blocked: bool
     pattern_day_trader: bool
+    # Equity at the prior close: the baseline today's drawdown is measured
+    # against. Appended last so existing positional call sites keep working.
+    last_equity: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -119,6 +122,7 @@ class AlpacaBroker:
             buying_power=float(p.get("buying_power", 0) or 0),
             cash=float(p.get("cash", 0) or 0),
             equity=float(p.get("equity", 0) or 0),
+            last_equity=float(p.get("last_equity", 0) or 0),
             trading_blocked=bool(p.get("trading_blocked")),
             pattern_day_trader=bool(p.get("pattern_day_trader")),
         )

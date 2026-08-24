@@ -73,6 +73,25 @@ def review(
     if proposed.decision == "NO_TRADE":
         return GuardrailResult(decision=proposed)
 
+    # A trade that runs against an open position takes risk off the book. Work
+    # this out first: several rules below deliberately exempt it.
+    pos = brief.open_position
+    reducing = bool(
+        pos is not None
+        and pos.qty != 0
+        and (
+            (proposed.decision == "SELL" and pos.is_long)
+            or (proposed.decision == "BUY" and pos.is_short)
+        )
+    )
+
+    # Rule: stop opening risk once the day's loss limit is hit. Exits stay
+    # available — the point is to stop digging, not to trap the account.
+    if brief.drawdown is not None and brief.drawdown.halts_entries and not reducing:
+        vetoes.append(
+            f"daily drawdown kill-switch is tripped ({brief.drawdown.describe()})"
+        )
+
     # Rule: only trade during regular market hours.
     if not brief.session.is_tradeable:
         vetoes.append(f"market is not in the regular session ({brief.session.detail})")
@@ -129,19 +148,8 @@ def review(
                 f"{zone.lower()} RSI {brief.rsi:.1f}"
             )
 
-    # A trade that runs against an open position takes risk off the book. It is
-    # capped only by what is actually held: entry-side limits must never stand
-    # between the account and the exit.
-    pos = brief.open_position
-    reducing = bool(
-        pos is not None
-        and pos.qty != 0
-        and (
-            (proposed.decision == "SELL" and pos.is_long)
-            or (proposed.decision == "BUY" and pos.is_short)
-        )
-    )
-
+    # A reducing trade is capped only by what is actually held: entry-side
+    # limits must never stand between the account and the exit.
     plan: Optional[SizingPlan] = None
     final_qty = proposed.qty
 

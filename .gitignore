@@ -14,3 +14,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Kill-switch latch state (per-machine, not shared)
+.killswitch.json

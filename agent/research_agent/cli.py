@@ -18,6 +18,12 @@ from .broker import Account, AlpacaBroker, LiveTradingBlocked, MarketClock
 from .config import AgentSettings, ConfigError
 from .execution import ExecutionReport, execute
 from .guardrails import review
+from .killswitch import (
+    DEFAULT_LATCH_FILE,
+    FileLatchStore,
+    NullLatchStore,
+    evaluate as evaluate_drawdown,
+)
 from .indicators import InsufficientData
 from .llm import propose_decision
 from .market_data import FixtureMarketData
@@ -70,6 +76,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="JSON",
         help='optional {"group": ["SYM", ...]} file declaring symbols as correlated',
     )
+    p.add_argument(
+        "--kill-switch-file",
+        default=DEFAULT_LATCH_FILE,
+        help=f"where the tripped kill-switch is recorded (default {DEFAULT_LATCH_FILE})",
+    )
+    p.add_argument(
+        "--reset-kill-switch",
+        action="store_true",
+        help="clear a tripped kill-switch and exit, re-arming it for today",
+    )
     p.add_argument("--env-file", default=".env", help="path to the .env file")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return p
@@ -91,6 +107,10 @@ def _resolve_account_and_clock(
                 equity=pv,
                 trading_blocked=False,
                 pattern_day_trader=False,
+                # Offline runs have no P&L history, so the day is flat by
+                # definition. Without this the kill-switch would read the
+                # missing baseline as unmeasurable and halt every dry run.
+                last_equity=pv,
             ),
             None,
         )
@@ -126,6 +146,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     load_dotenv(Path(args.env_file))
 
+    if args.reset_kill_switch:
+        FileLatchStore(args.kill_switch_file).clear()
+        print(
+            f"[kill-switch] cleared {args.kill_switch_file}; entries are re-armed "
+            "for today.",
+            file=sys.stderr,
+        )
+        return 0
+
     symbol = args.symbol.strip().upper()
     try:
         settings = AgentSettings.from_env()
@@ -145,6 +174,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             provider = AlpacaMarketData(http)
 
         account, clock = _resolve_account_and_clock(args, broker)
+
+        # The latch is only meaningful against a real account.
+        drawdown = evaluate_drawdown(
+            account,
+            settings.risk,
+            store=FileLatchStore(args.kill_switch_file) if broker else NullLatchStore(),
+        )
         position = broker.position(symbol) if broker else None
         exposure = (
             assess_from_broker(broker, account.portfolio_value) if broker else None
@@ -175,6 +211,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             position=position,
             clock=clock,
             exposure=exposure,
+            drawdown=drawdown,
             peer_bars=peer_bars,
             static_groups=load_static_groups(args.correlation_groups),
             timeframe=args.timeframe,
@@ -189,6 +226,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     print(f"[research] {brief.session.detail}", file=sys.stderr)
+    if brief.drawdown is not None:
+        marker = "HALTED" if brief.drawdown.halts_entries else "ok"
+        print(f"[kill-switch] {marker}: {brief.drawdown.describe()}", file=sys.stderr)
     if brief.exposure is not None and brief.exposure.positions:
         print(
             f"[research] portfolio risk {brief.exposure.total_risk:,.2f} "

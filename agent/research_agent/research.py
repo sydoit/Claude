@@ -9,6 +9,7 @@ from typing import Mapping, Optional, Sequence
 from .broker import Account, MarketClock, Position
 from .config import MARKET_TZ, RiskPolicy
 from .indicators import Bar, InsufficientData, atr, pct_change, rsi, sma
+from .killswitch import DrawdownState
 from .market_data import Headline, MarketDataProvider, Quote
 from .portfolio import PortfolioExposure, RiskCluster, cluster_book
 
@@ -87,6 +88,7 @@ class ResearchBrief:
     buying_power: float
     open_position: Optional[Position]
     exposure: Optional[PortfolioExposure] = None
+    drawdown: Optional[DrawdownState] = None
     peer_bars: Mapping[str, Sequence[Bar]] = field(default_factory=dict)
     static_groups: Mapping[str, str] = field(default_factory=dict)
     clusters: Sequence[RiskCluster] = field(default_factory=tuple)
@@ -154,6 +156,18 @@ class ResearchBrief:
             f"  Risk budget for this trade ({policy.max_risk_pct:.2%} of portfolio):"
             f" {self.portfolio_value * policy.max_risk_pct:,.2f}",
         ]
+        if self.drawdown is not None:
+            lines += [
+                "",
+                "DAY SO FAR",
+                f"  {self.drawdown.describe()}",
+            ]
+            if self.drawdown.halts_entries:
+                lines.append(
+                    "  New positions are halted for the rest of the session. "
+                    "Only NO_TRADE, or a trade that reduces an open position, "
+                    "can be acted on."
+                )
         if self.exposure is not None:
             lines += ["", "PORTFOLIO RISK ALREADY OPEN"]
             lines += self.exposure.describe(policy)
@@ -189,6 +203,7 @@ def build_brief(
     position: Optional[Position],
     clock: Optional[MarketClock],
     exposure: Optional[PortfolioExposure] = None,
+    drawdown: Optional[DrawdownState] = None,
     peer_bars: Optional[Mapping[str, Sequence[Bar]]] = None,
     static_groups: Optional[Mapping[str, str]] = None,
     timeframe: str = "1Day",
@@ -233,6 +248,9 @@ def build_brief(
             f"latest quote is {age:.0f}s old (limit {policy.max_quote_age_seconds}s)"
         )
 
+    if drawdown is not None and not drawdown.measurable:
+        warnings.append(drawdown.detail)
+
     if exposure is not None and exposure.unprotected:
         names = ", ".join(p.symbol for p in exposure.unprotected)
         warnings.append(
@@ -269,6 +287,7 @@ def build_brief(
         buying_power=account.buying_power,
         open_position=position,
         exposure=exposure,
+        drawdown=drawdown,
         peer_bars=peers,
         static_groups=groups,
         clusters=clusters,

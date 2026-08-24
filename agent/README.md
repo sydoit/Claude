@@ -29,6 +29,7 @@ confident answer built on a stale quote. So every hard rule exists twice:
 | Never risk >2% of portfolio on one trade | system prompt | `sizing.py` + `guardrails.py` — qty is clamped to the cap |
 | Never risk >6% across the whole book | system prompt | `portfolio.py` — open risk is measured and subtracted before sizing |
 | Never risk >4% in one correlated cluster | system prompt | `correlation.py` — positions that move together share a budget |
+| Stop trading after a 3% day | system prompt | `killswitch.py` — entries halt and stay halted for the session |
 | No trading at RSI ≥70 / ≤30 without a strong contrarian reason | system prompt | `guardrails.py` — momentum trades into an extreme are vetoed outright |
 | Regular market hours only (9:30–16:00 ET) | system prompt | `research.py` clock + broker calendar; outside it, vetoed |
 | If uncertain, default to NO_TRADE | system prompt | every failure path — API error, refusal, bad schema, unreadable data — returns NO_TRADE |
@@ -133,6 +134,55 @@ python -m research_agent NVDA --correlation-groups groups.json
 Symbols sharing a declared group are treated as fully correlated regardless of
 what their prices did. Symbols in *different* declared groups fall back to
 measurement rather than being assumed independent.
+
+## What the kill-switch adds
+
+The caps size entries. None of them stops a bad day from compounding: you can
+lose the per-trade limit, take another trade, lose again, and stay inside every
+cap the whole way down. So once the day's loss crosses **3% of the prior
+close**, new positions stop.
+
+```
+day P&L = current equity − last_equity   (the broker's own prior-close figure)
+halt if  day P&L ≤ −3% × last_equity
+```
+
+**The baseline needs no local state.** It comes from the broker's `last_equity`,
+so the measurement is right after a restart, on a different machine, and for
+losses you took by hand outside the bot.
+
+**The switch latches.** Once tripped it stays tripped for the rest of the
+trading day, even if equity recovers:
+
+| Time | Equity | Day P&L | Switch | New BUY |
+|---|---|---|---|---|
+| 10:00 | 100,000 | +0 | ok | approved |
+| 11:00 | 98,500 | −1,500 | ok | approved |
+| 12:00 | 96,500 | −3,500 | **TRIPPED** | vetoed |
+| 13:00 | 99,000 | −1,000 | **TRIPPED** (latched) | vetoed |
+| 14:00 | 100,500 | +500 | **TRIPPED** (latched) | vetoed |
+
+A switch that un-trips the moment the screen turns green is not a circuit
+breaker; it is a way to get whipsawed back into the position that just hurt you.
+Latching is the one thing in this system that genuinely has to be remembered, so
+it is written to a small file keyed by trading date (`.killswitch.json`). A new
+trading day clears it, and an operator can re-arm the day by hand:
+
+```bash
+python -m research_agent NVDA --reset-kill-switch
+```
+
+Set `KILL_SWITCH_LATCH=false` to have the switch follow live equity instead.
+
+**Exits are never blocked.** With the switch tripped, selling a long or covering
+a short is still approved in full — the point is to stop digging, not to trap
+the account in what it already holds. Adding to a losing position is an entry,
+though, whatever the position already is, so averaging down is refused.
+
+If the broker reports no prior-close equity, the day cannot be measured and
+entries halt. That is the same reading applied to unstopped positions and
+unmeasurable correlations: a limit that cannot be checked is treated as
+breached.
 
 ### Reducing is never blocked
 
@@ -250,6 +300,8 @@ Everything in `.env`; the defaults are the spec's numbers.
 | `CORRELATION_LOOKBACK` | `60` | Sessions of returns used to measure correlation |
 | `CORRELATION_MIN_OBSERVATIONS` | `20` | Below this many shared sessions, assume correlated |
 | `CORRELATION_GROUPS_FILE` | unset | Optional JSON declaring symbols correlated by hand |
+| `MAX_DAILY_DRAWDOWN_PCT` | `0.03` | Day's loss vs the prior close that halts entries. Must be ≥ `MAX_RISK_PCT`. |
+| `KILL_SWITCH_LATCH` | `true` | Keep the switch tripped for the rest of the session |
 | `MAX_POSITION_PCT` | `0.25` | Notional concentration cap |
 | `STOP_ATR_MULT` | `1.5` | Stop distance in ATRs — this is what sets position size |
 | `TAKE_PROFIT_R` | `2.0` | Target distance, in multiples of the stop distance |
@@ -271,7 +323,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-207 tests, no network and no API key required. The suite is mostly about the
+249 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -290,6 +342,7 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/sizing.py` | Risk budget → share count |
 | `research_agent/portfolio.py` | Measures risk already open across the book |
 | `research_agent/correlation.py` | Works out which positions fail together |
+| `research_agent/killswitch.py` | Halts entries after a losing day, and latches |
 | `research_agent/guardrails.py` | Re-checks every rule; vetoes or clamps |
 | `research_agent/broker.py` | Account, clock, orders, and the paper-endpoint guard |
 | `research_agent/execution.py` | Reconciles the decision with the open position |
@@ -305,6 +358,9 @@ including that the stop is attached and that the live endpoint is refused.
 * **The model is non-deterministic.** The same brief can produce different
   decisions on different runs. The guardrails are deterministic; the reasoning
   is not.
+* **The kill-switch halts, it does not liquidate.** It stops new risk going
+  on; it will not close what you already hold. Deciding to flatten a book is a
+  judgement this does not make for you.
 * **Correlation is backward-looking and unstable.** Sixty sessions of returns
   describe the last three months, not the next crisis, and correlations
   converge toward 1 precisely when diversification is most needed. Treat the

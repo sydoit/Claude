@@ -85,3 +85,31 @@ def test_offline_without_a_portfolio_value_is_refused(monkeypatch, capsys):
     code = cli.main(["TEST", "--offline", FIXTURE, "--env-file", "/nonexistent"])
     assert code == 1
     assert "--portfolio-value" in capsys.readouterr().err
+
+
+def test_reset_kill_switch_clears_the_latch(tmp_path, capsys):
+    latch = tmp_path / "k.json"
+    latch.write_text('{"trading_day": "2026-03-02"}')
+    code = cli.main(["TEST", "--reset-kill-switch", "--kill-switch-file", str(latch),
+                     "--env-file", "/nonexistent"])
+    assert code == 0
+    assert not latch.exists()
+    assert "re-armed" in capsys.readouterr().err
+
+
+def test_reset_is_harmless_when_nothing_is_latched(tmp_path, capsys):
+    code = cli.main(["TEST", "--reset-kill-switch",
+                     "--kill-switch-file", str(tmp_path / "absent.json"),
+                     "--env-file", "/nonexistent"])
+    assert code == 0
+
+
+def test_offline_runs_are_not_halted_by_a_missing_baseline(monkeypatch, capsys):
+    """An offline day has no P&L history and must read as flat, not unmeasurable."""
+    code, out = run(
+        monkeypatch, capsys,
+        TradeDecision(decision="BUY", symbol="TEST", qty=20, reasoning="x", confidence="HIGH"),
+    )
+    assert code == 0
+    assert "kill-switch] ok" in out.err
+    assert json.loads(out.out)["decision"] == "BUY"

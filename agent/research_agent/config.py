@@ -47,6 +47,8 @@ class RiskPolicy:
     correlation_threshold: float = 0.7
     correlation_lookback: int = 60
     correlation_min_observations: int = 20
+    max_daily_drawdown_pct: float = 0.03
+    kill_switch_latch: bool = True
     max_position_pct: float = 0.25
     stop_atr_mult: float = 1.5
     take_profit_r: float = 2.0
@@ -84,6 +86,17 @@ class RiskPolicy:
                 f"max_cluster_risk_pct ({self.max_cluster_risk_pct:.2%}) <= "
                 f"max_portfolio_risk_pct ({self.max_portfolio_risk_pct:.2%})"
             )
+        if not 0 < self.max_daily_drawdown_pct <= 1:
+            raise ConfigError(
+                "max_daily_drawdown_pct must be in (0, 1], got "
+                f"{self.max_daily_drawdown_pct!r}"
+            )
+        if self.max_daily_drawdown_pct < self.max_risk_pct:
+            raise ConfigError(
+                f"max_daily_drawdown_pct ({self.max_daily_drawdown_pct:.2%}) is "
+                f"below max_risk_pct ({self.max_risk_pct:.2%}): a single losing "
+                "trade would end every session before a second could be placed"
+            )
         if not 0 < self.correlation_threshold <= 1:
             raise ConfigError("correlation_threshold must be in (0, 1]")
         if self.correlation_lookback < 5 or self.correlation_min_observations < 2:
@@ -117,6 +130,8 @@ class RiskPolicy:
             correlation_threshold=_env_float("CORRELATION_THRESHOLD", 0.7),
             correlation_lookback=_env_int("CORRELATION_LOOKBACK", 60),
             correlation_min_observations=_env_int("CORRELATION_MIN_OBSERVATIONS", 20),
+            max_daily_drawdown_pct=_env_float("MAX_DAILY_DRAWDOWN_PCT", 0.03),
+            kill_switch_latch=_env_bool("KILL_SWITCH_LATCH", True),
             max_position_pct=_env_float("MAX_POSITION_PCT", 0.25),
             stop_atr_mult=_env_float("STOP_ATR_MULT", 1.5),
             take_profit_r=_env_float("TAKE_PROFIT_R", 2.0),

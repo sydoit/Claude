@@ -43,6 +43,11 @@ anything is submitted, using these definitions:
   headroom is left; a position with no working stop counts its full notional.
   Your trade is sized into the headroom that remains, so when the book is
   already loaded the honest answer is often NO_TRADE.
+- **The day can be closed.** If the account is down
+  {policy.max_daily_drawdown_pct:.2%} against the prior close, a kill-switch
+  halts new positions for the rest of the session and stays halted even if
+  equity recovers. The brief tells you when it is tripped; the only valid
+  answers then are NO_TRADE, or a trade that reduces something already open.
 - **Correlated positions share a budget.** Open positions that move together
   are charged against one cluster cap of {policy.max_cluster_risk_pct:.2%},
   because six positions in the same theme are closer to one bet than to six.

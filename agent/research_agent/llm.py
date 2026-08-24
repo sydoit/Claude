@@ -73,6 +73,19 @@ def propose_decision(
             ),
             error=str(exc),
         )
+    except Exception as exc:
+        # Misconfiguration (an unresolvable API key raises before any request
+        # is built), a schema the SDK rejects, anything else unforeseen. The
+        # uncertainty rule applies to the machinery as much as to the market.
+        log.warning("Claude call failed: %s", exc)
+        return ModelOutcome(
+            decision=no_trade(
+                brief.symbol,
+                "No decision was made: the reasoning step failed to run "
+                f"({type(exc).__name__}). Defaulting to NO_TRADE.",
+            ),
+            error=f"{type(exc).__name__}: {exc}",
+        )
 
     if response.stop_reason == "refusal":
         return ModelOutcome(

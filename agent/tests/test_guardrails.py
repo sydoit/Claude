@@ -496,3 +496,97 @@ def test_the_brief_lists_the_clusters(policy):
     block = brief.to_prompt_block(policy)
     assert "CORRELATION CLUSTERS" in block
     assert "C0+C1" in block or "C1+C0" in block
+
+
+# --- rule: the daily drawdown kill-switch ------------------------------------
+
+def _drawdown(equity, last_equity=100_000.0, policy=None):
+    from research_agent.broker import Account
+    from research_agent.config import RiskPolicy
+    from research_agent.killswitch import evaluate
+
+    account = Account(
+        account_number="PA", portfolio_value=equity, buying_power=equity * 2,
+        cash=equity, equity=equity, trading_blocked=False,
+        pattern_day_trader=False, last_equity=last_equity,
+    )
+    return evaluate(account, policy or RiskPolicy())
+
+
+def test_a_tripped_kill_switch_vetoes_new_positions(policy):
+    brief = make_brief(drawdown=_drawdown(95_000))
+    result = review(buy(), brief, policy)
+    assert not result.approved
+    assert any("kill-switch is tripped" in v for v in result.vetoes)
+
+
+def test_a_tripped_kill_switch_vetoes_new_shorts_too(policy):
+    result = review(sell(), make_brief(drawdown=_drawdown(95_000)), policy)
+    assert not result.approved
+    assert any("kill-switch is tripped" in v for v in result.vetoes)
+
+
+def test_an_untripped_kill_switch_changes_nothing(policy):
+    assert review(buy(), make_brief(drawdown=_drawdown(99_000)), policy).approved
+
+
+def test_a_tripped_kill_switch_still_allows_a_full_exit(policy):
+    """Stop digging, do not trap the account in what it already holds."""
+    from research_agent.broker import Position
+
+    held = Position("TEST", 300, 100.0, 30_000.0, 100.0)
+    result = review(
+        sell(qty=300), make_brief(position=held, drawdown=_drawdown(90_000)), policy
+    )
+    assert result.approved
+    assert result.decision.qty == 300
+
+
+def test_a_tripped_kill_switch_still_allows_covering_a_short(policy):
+    from research_agent.broker import Position
+
+    held = Position("TEST", -80, 100.0, -8_000.0, 100.0)
+    result = review(
+        buy(qty=80), make_brief(position=held, drawdown=_drawdown(90_000)), policy
+    )
+    assert result.approved
+
+
+def test_a_tripped_kill_switch_does_not_let_you_add_to_a_loser(policy):
+    """Averaging down is an entry, whatever the position already is."""
+    from research_agent.broker import Position
+
+    held = Position("TEST", 100, 100.0, 10_000.0, 100.0)
+    result = review(
+        buy(qty=50), make_brief(position=held, drawdown=_drawdown(90_000)), policy
+    )
+    assert not result.approved
+    assert any("kill-switch is tripped" in v for v in result.vetoes)
+
+
+def test_an_unmeasurable_day_halts_entries(policy):
+    result = review(buy(), make_brief(drawdown=_drawdown(100_000, last_equity=0)), policy)
+    assert not result.approved
+    assert any("kill-switch is tripped" in v for v in result.vetoes)
+
+
+def test_the_veto_explains_the_day(policy):
+    result = review(buy(), make_brief(drawdown=_drawdown(94_000)), policy)
+    text = result.decision.reasoning
+    assert "kill-switch" in text and "-6,000.00" in text
+
+
+def test_the_brief_reports_the_day(policy):
+    block = make_brief(drawdown=_drawdown(98_000)).to_prompt_block(policy)
+    assert "DAY SO FAR" in block
+    assert "1,000.00 of daily loss budget left" in block
+
+
+def test_the_brief_says_when_entries_are_halted(policy):
+    block = make_brief(drawdown=_drawdown(95_000)).to_prompt_block(policy)
+    assert "New positions are halted" in block
+
+
+def test_an_unmeasurable_day_is_a_data_warning(policy):
+    brief = make_brief(drawdown=_drawdown(100_000, last_equity=0))
+    assert any("cannot be measured" in w for w in brief.warnings)
