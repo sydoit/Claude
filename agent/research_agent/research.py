@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 from .broker import Account, MarketClock, Position
 from .config import MARKET_TZ, RiskPolicy
 from .indicators import Bar, InsufficientData, atr, pct_change, rsi, sma
 from .market_data import Headline, MarketDataProvider, Quote
-from .portfolio import PortfolioExposure
+from .portfolio import PortfolioExposure, RiskCluster, cluster_book
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,9 @@ class ResearchBrief:
     buying_power: float
     open_position: Optional[Position]
     exposure: Optional[PortfolioExposure] = None
+    peer_bars: Mapping[str, Sequence[Bar]] = field(default_factory=dict)
+    static_groups: Mapping[str, str] = field(default_factory=dict)
+    clusters: Sequence[RiskCluster] = field(default_factory=tuple)
     headlines: Sequence[Headline] = field(default_factory=tuple)
     warnings: Sequence[str] = field(default_factory=tuple)
 
@@ -158,6 +161,13 @@ class ResearchBrief:
                 f"  Headroom for a new trade: "
                 f"{self.exposure.headroom(policy):,.2f}"
             )
+        if self.clusters:
+            lines += ["", "CORRELATION CLUSTERS (positions that fail together)"]
+            for cluster in sorted(
+                self.clusters, key=lambda c: c.total_risk, reverse=True
+            ):
+                lines.append(f"  - {cluster.describe(self.portfolio_value, policy)}")
+                lines += [f"      {n}" for n in cluster.notes]
         if self.headlines:
             lines += ["", "RECENT HEADLINES"]
             lines += [
@@ -179,6 +189,8 @@ def build_brief(
     position: Optional[Position],
     clock: Optional[MarketClock],
     exposure: Optional[PortfolioExposure] = None,
+    peer_bars: Optional[Mapping[str, Sequence[Bar]]] = None,
+    static_groups: Optional[Mapping[str, str]] = None,
     timeframe: str = "1Day",
     bar_limit: int = 120,
     news_limit: int = 6,
@@ -194,6 +206,25 @@ def build_brief(
             f"{symbol}: need at least {needed} {timeframe} bars to compute "
             f"RSI({policy.rsi_period})/ATR({policy.atr_period}), got {len(bars)}"
         )
+
+    # The candidate's own history is part of the correlation input set.
+    peers: dict[str, Sequence[Bar]] = dict(peer_bars or {})
+    peers[symbol] = bars
+    groups = dict(static_groups or {})
+
+    clusters: tuple[RiskCluster, ...] = ()
+    if exposure is not None and exposure.positions:
+        clusters = tuple(cluster_book(exposure, peers, policy, groups))
+        missing = [
+            p.symbol
+            for p in exposure.positions
+            if not peers.get(p.symbol.upper())
+        ]
+        if missing:
+            warnings.append(
+                f"no price history for {', '.join(missing)}; treated as "
+                f"correlated with everything, which is the conservative reading"
+            )
 
     quote = provider.latest_quote(symbol)
     age = quote.age_seconds(now)
@@ -238,6 +269,9 @@ def build_brief(
         buying_power=account.buying_power,
         open_position=position,
         exposure=exposure,
+        peer_bars=peers,
+        static_groups=groups,
+        clusters=clusters,
         headlines=tuple(provider.news(symbol, limit=news_limit)),
         warnings=tuple(warnings),
     )

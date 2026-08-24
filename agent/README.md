@@ -28,6 +28,7 @@ confident answer built on a stale quote. So every hard rule exists twice:
 |---|---|---|
 | Never risk >2% of portfolio on one trade | system prompt | `sizing.py` + `guardrails.py` — qty is clamped to the cap |
 | Never risk >6% across the whole book | system prompt | `portfolio.py` — open risk is measured and subtracted before sizing |
+| Never risk >4% in one correlated cluster | system prompt | `correlation.py` — positions that move together share a budget |
 | No trading at RSI ≥70 / ≤30 without a strong contrarian reason | system prompt | `guardrails.py` — momentum trades into an extreme are vetoed outright |
 | Regular market hours only (9:30–16:00 ET) | system prompt | `research.py` clock + broker calendar; outside it, vetoed |
 | If uncertain, default to NO_TRADE | system prompt | every failure path — API error, refusal, bad schema, unreadable data — returns NO_TRADE |
@@ -76,6 +77,62 @@ edge; the run says so loudly on `stderr`.
 
 Where several stops protect one position, the tightest one binds. A stop that
 has trailed past break-even reports zero risk, not negative.
+
+## What correlation grouping adds
+
+A per-symbol cap treats six semiconductor longs as six independent 1% bets.
+They are closer to one 6% bet. So before sizing, the agent works out which open
+positions the new trade would actually compound, and charges them against a
+single **cluster cap** (4% by default), which sits between the per-trade cap and
+the book cap:
+
+```
+per trade   2%   ──  one position
+cluster     4%   ──  everything that moves together
+whole book  6%   ──  everything
+```
+
+**Direction is part of the measurement.** What matters is correlation of *signed
+exposure*, not of price. Two symbols correlated +0.9 held in opposite directions
+hedge each other; the same pair held the same way is one trade wearing two
+tickers. So every correlation is multiplied by the product of the two position
+directions before it is judged:
+
+| Correlation | Directions | Verdict |
+|---|---|---|
+| +0.9 | both long | one cluster — risks add |
+| +0.9 | long vs short | hedged — not clustered |
+| −0.9 | long vs short | one cluster — risks add |
+
+A trade that hedges the book is therefore never charged to a cluster, which is
+the behaviour you want: reducing net exposure should not be rationed.
+
+Correlation is measured on daily returns over 60 sessions, aligned to the
+sessions both symbols actually traded. **Where it cannot be measured — too
+little overlapping history, a flat series, a symbol whose bars will not load —
+the pair is treated as correlated.** Diversification is a claim that has to be
+earned, and an unmeasurable pair has not earned it.
+
+Grouping the existing book is single-linkage: if A clusters with B and B with C,
+all three are one cluster even when A and C are independent. That over-groups
+rather than under-groups, which is the safe direction for a risk cap.
+
+### Declaring correlation by hand
+
+Measurement fails exactly where it matters most — a symbol listed last month has
+no history to correlate. An optional JSON file forces the relationship:
+
+```json
+{ "semis": ["NVDA", "AMD", "AVGO"], "regional banks": ["ZION", "KEY"] }
+```
+
+```bash
+python -m research_agent NVDA --correlation-groups groups.json
+```
+
+Symbols sharing a declared group are treated as fully correlated regardless of
+what their prices did. Symbols in *different* declared groups fall back to
+measurement rather than being assumed independent.
 
 ### Reducing is never blocked
 
@@ -187,7 +244,12 @@ Everything in `.env`; the defaults are the spec's numbers.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MAX_RISK_PCT` | `0.02` | Risk cap per trade. **Values above 0.02 are rejected at startup.** |
-| `MAX_PORTFOLIO_RISK_PCT` | `0.06` | Aggregate risk cap across every open position. Must be ≥ `MAX_RISK_PCT`. |
+| `MAX_PORTFOLIO_RISK_PCT` | `0.06` | Aggregate risk cap across every open position |
+| `MAX_CLUSTER_RISK_PCT` | `0.04` | Risk cap shared by correlated positions. Must sit between the other two caps. |
+| `CORRELATION_THRESHOLD` | `0.7` | Signed correlation at or above which positions share a cluster |
+| `CORRELATION_LOOKBACK` | `60` | Sessions of returns used to measure correlation |
+| `CORRELATION_MIN_OBSERVATIONS` | `20` | Below this many shared sessions, assume correlated |
+| `CORRELATION_GROUPS_FILE` | unset | Optional JSON declaring symbols correlated by hand |
 | `MAX_POSITION_PCT` | `0.25` | Notional concentration cap |
 | `STOP_ATR_MULT` | `1.5` | Stop distance in ATRs — this is what sets position size |
 | `TAKE_PROFIT_R` | `2.0` | Target distance, in multiples of the stop distance |
@@ -209,7 +271,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-166 tests, no network and no API key required. The suite is mostly about the
+207 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -227,6 +289,7 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/llm.py` | The Claude call; every failure resolves to NO_TRADE |
 | `research_agent/sizing.py` | Risk budget → share count |
 | `research_agent/portfolio.py` | Measures risk already open across the book |
+| `research_agent/correlation.py` | Works out which positions fail together |
 | `research_agent/guardrails.py` | Re-checks every rule; vetoes or clamps |
 | `research_agent/broker.py` | Account, clock, orders, and the paper-endpoint guard |
 | `research_agent/execution.py` | Reconciles the decision with the open position |
@@ -242,9 +305,10 @@ including that the stop is attached and that the live endpoint is refused.
 * **The model is non-deterministic.** The same brief can produce different
   decisions on different runs. The guardrails are deterministic; the reasoning
   is not.
-* **The caps are per-symbol and per-book, not per-strategy.** Correlated
-  positions are counted separately even when they would all fail together; six
-  semiconductor longs at 1% each read as 6% of diversified risk, and are not.
+* **Correlation is backward-looking and unstable.** Sixty sessions of returns
+  describe the last three months, not the next crisis, and correlations
+  converge toward 1 precisely when diversification is most needed. Treat the
+  cluster cap as a floor on prudence, not a measure of safety.
 * **Rate limits and data quality.** The free `iex` feed is thinner than `sip`.
   A wide or stale quote produces worse sizing, which is why stale quotes are
   vetoed outright.

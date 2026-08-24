@@ -21,6 +21,7 @@ from .guardrails import review
 from .indicators import InsufficientData
 from .llm import propose_decision
 from .market_data import FixtureMarketData
+from .correlation import load_static_groups
 from .portfolio import assess_from_broker
 from .research import build_brief
 from .schema import no_trade
@@ -63,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--portfolio-value",
         type=float,
         help="override portfolio value (required with --offline)",
+    )
+    p.add_argument(
+        "--correlation-groups",
+        metavar="JSON",
+        help='optional {"group": ["SYM", ...]} file declaring symbols as correlated',
     )
     p.add_argument("--env-file", default=".env", help="path to the .env file")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
@@ -144,6 +150,23 @@ def main(argv: Optional[list[str]] = None) -> int:
             assess_from_broker(broker, account.portfolio_value) if broker else None
         )
 
+        # Correlation needs history for every open position, not just the
+        # candidate. A symbol whose bars will not load is left out, and the
+        # correlation layer then treats it as correlated with everything.
+        peer_bars = {}
+        if exposure is not None:
+            for held in exposure.positions:
+                if held.symbol.upper() == symbol:
+                    continue
+                try:
+                    peer_bars[held.symbol.upper()] = provider.bars(
+                        held.symbol,
+                        timeframe=args.timeframe,
+                        limit=settings.risk.correlation_lookback + 5,
+                    )
+                except Exception as exc:
+                    log.warning("no bars for %s: %s", held.symbol, exc)
+
         brief = build_brief(
             symbol,
             provider=provider,
@@ -152,6 +175,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             position=position,
             clock=clock,
             exposure=exposure,
+            peer_bars=peer_bars,
+            static_groups=load_static_groups(args.correlation_groups),
             timeframe=args.timeframe,
             bar_limit=args.bars,
         )
@@ -172,6 +197,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             f"{brief.exposure.headroom(settings.risk):,.2f}",
             file=sys.stderr,
         )
+        for cluster in sorted(
+            brief.clusters, key=lambda c: c.total_risk, reverse=True
+        ):
+            if len(cluster.members) > 1:
+                print(
+                    f"[research] cluster "
+                    f"{cluster.describe(brief.portfolio_value, settings.risk)}",
+                    file=sys.stderr,
+                )
         for unprotected in brief.exposure.unprotected:
             print(
                 f"[research] WARNING: {unprotected.symbol} has no working stop; "

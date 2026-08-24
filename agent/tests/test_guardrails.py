@@ -6,6 +6,7 @@ from research_agent.guardrails import review
 from research_agent.schema import TradeDecision, no_trade
 from tests.conftest import (
     et,
+    uncorrelated_bars,
     falling_closes,
     flat_closes,
     make_brief,
@@ -240,11 +241,18 @@ def _exposure(*specs, portfolio_value=100_000.0):
     return assess(positions, orders, portfolio_value)
 
 
+def _uncorrelated_book(n, qty=100, price=100.0, stop=90.0):
+    """A book of n mutually uncorrelated positions, plus their price history."""
+    symbols = [f"S{i}" for i in range(n)]
+    book = _exposure(*[(s, qty, price, stop) for s in symbols])
+    return book, uncorrelated_bars(["TEST", *symbols])
+
+
 def test_a_loaded_book_vetoes_a_new_trade(policy):
-    """Six positions each risking ~1% exhaust the 6% portfolio cap."""
-    book = _exposure(*[(f"S{i}", 100, 100.0, 90.0) for i in range(6)])
+    """Six uncorrelated positions each risking ~1% exhaust the 6% book cap."""
+    book, bars = _uncorrelated_book(6)
     assert book.total_risk == pytest.approx(6_000.0)
-    result = review(buy(qty=10), make_brief(exposure=book), policy)
+    result = review(buy(qty=10), make_brief(exposure=book, peer_bars=bars), policy)
     assert not result.approved
     assert any("portfolio risk cap" in v for v in result.vetoes)
 
@@ -253,8 +261,9 @@ def test_a_partly_loaded_book_clamps_rather_than_vetoes(policy):
     """5,500 of risk already open leaves 500 of the 6,000 budget, which is
     tighter than the entry-side caps and so becomes the binding constraint."""
     book = _exposure(("S1", 550, 100.0, 90.0))
+    bars = uncorrelated_bars(["TEST", "S1"])
     assert book.total_risk == pytest.approx(5_500.0)
-    brief = make_brief(exposure=book)
+    brief = make_brief(exposure=book, peer_bars=bars)
     result = review(buy(qty=100_000), brief, policy)
 
     assert result.approved
@@ -264,7 +273,7 @@ def test_a_partly_loaded_book_clamps_rather_than_vetoes(policy):
 
 def test_the_portfolio_cap_can_bind_tighter_than_the_per_trade_cap(policy):
     book = _exposure(("S1", 570, 100.0, 90.0))  # 5,700 open, 300 left
-    brief = make_brief(exposure=book)
+    brief = make_brief(exposure=book, peer_bars=uncorrelated_bars(["TEST", "S1"]))
     unconstrained = review(buy(qty=100_000), make_brief(), policy)
     constrained = review(buy(qty=100_000), brief, policy)
 
@@ -276,8 +285,9 @@ def test_the_portfolio_cap_can_bind_tighter_than_the_per_trade_cap(policy):
 def test_an_unstopped_position_eats_the_whole_budget(policy):
     """No stop means no measurable floor, so the notional counts in full."""
     book = _exposure(("S1", 100, 100.0, None))  # 10,000 notional vs a 6,000 cap
+    bars = uncorrelated_bars(["TEST", "S1"])
     assert book.total_risk == pytest.approx(10_000.0)
-    result = review(buy(qty=10), make_brief(exposure=book), policy)
+    result = review(buy(qty=10), make_brief(exposure=book, peer_bars=bars), policy)
     assert not result.approved
     assert any("portfolio risk cap" in v for v in result.vetoes)
 
@@ -292,9 +302,9 @@ def test_an_empty_book_does_not_constrain_anything(policy):
 def test_the_cap_is_configurable():
     from research_agent.config import RiskPolicy
 
-    generous = RiskPolicy(max_portfolio_risk_pct=0.20)
-    book = _exposure(*[(f"S{i}", 100, 100.0, 90.0) for i in range(6)])
-    brief = make_brief(exposure=book, policy=generous)
+    generous = RiskPolicy(max_portfolio_risk_pct=0.20, max_cluster_risk_pct=0.20)
+    book, bars = _uncorrelated_book(6)
+    brief = make_brief(exposure=book, peer_bars=bars, policy=generous)
     assert review(buy(qty=10), brief, generous).approved
 
 
@@ -330,9 +340,11 @@ def test_a_full_exit_is_allowed_even_with_the_book_at_its_cap(policy):
     """Reducing risk must stay possible precisely when the cap is breached."""
     from research_agent.broker import Position
 
-    book = _exposure(*[(f"S{i}", 100, 100.0, 90.0) for i in range(8)])
+    book, bars = _uncorrelated_book(8)
     held = Position("TEST", 50, 100.0, 5_000.0, 100.0)
-    result = review(sell(qty=50), make_brief(position=held, exposure=book), policy)
+    result = review(
+        sell(qty=50), make_brief(position=held, exposure=book, peer_bars=bars), policy
+    )
     assert result.approved
     assert result.decision.qty == 50
 
@@ -353,3 +365,134 @@ def test_adding_to_a_position_is_still_constrained(policy):
     held = Position("TEST", 900, 100.0, 90_000.0, 100.0)
     result = review(buy(qty=900), make_brief(position=held), policy)
     assert not result.approved
+
+
+# --- rule: correlated positions share a budget --------------------------------
+
+import math as _math
+
+_WAVE = [0.01 * _math.sin(i / 3) + 0.004 * _math.cos(i / 7) for i in range(70)]
+
+
+def _corr_series(rates, start=100.0):
+    from tests.conftest import make_bars
+
+    closes = [start]
+    for r in rates:
+        closes.append(closes[-1] * (1 + r))
+    return make_bars(closes)
+
+
+def _wave_closes(start=100.0):
+    closes = [start]
+    for r in _WAVE:
+        closes.append(closes[-1] * (1 + r))
+    return closes
+
+
+def _correlated_book(n, risk_each=900.0):
+    """n correlated longs, each risking `risk_each` (price 100, stop 90)."""
+    symbols = [f"C{i}" for i in range(n)]
+    book = _exposure(*[(s, int(risk_each / 10), 100.0, 90.0) for s in symbols])
+    return book, {s: _corr_series(_WAVE) for s in symbols}
+
+
+def test_correlated_longs_share_one_budget_and_clamp_the_next_trade(policy):
+    """Four correlated longs at 1% each fill the 4% cluster cap outright."""
+    book, bars = _correlated_book(4, risk_each=1_000.0)
+    brief = make_brief(closes=_wave_closes(), exposure=book, peer_bars=bars)
+
+    assert brief.exposure.total_risk == pytest.approx(4_000.0)
+    result = review(buy(qty=100_000), brief, policy)
+    assert not result.approved
+    assert any("correlation cluster cap" in v for v in result.vetoes)
+
+
+def test_the_cluster_cap_binds_before_the_portfolio_cap(policy):
+    """3,600 correlated sits inside the 6% book cap but squeezes the 4% cluster."""
+    book, bars = _correlated_book(4, risk_each=900.0)
+    brief = make_brief(closes=_wave_closes(), exposure=book, peer_bars=bars)
+
+    assert brief.exposure.headroom(policy) == pytest.approx(2_400.0)  # book is fine
+    result = review(buy(qty=100_000), brief, policy)
+    assert result.approved
+    assert any("correlation cluster cap" in a for a in result.adjustments)
+    assert any("correlated with" in a for a in result.adjustments)
+
+
+def test_an_uncorrelated_book_leaves_the_trade_larger(policy):
+    """Same risk on the book, but independent, permits a bigger clip."""
+    book, correlated_bars = _correlated_book(4, risk_each=900.0)
+    independent_bars = uncorrelated_bars([f"C{i}" for i in range(4)])
+
+    correlated = review(
+        buy(qty=100_000),
+        make_brief(closes=_wave_closes(), exposure=book, peer_bars=correlated_bars),
+        policy,
+    )
+    independent = review(
+        buy(qty=100_000),
+        make_brief(closes=_wave_closes(), exposure=book, peer_bars=independent_bars),
+        policy,
+    )
+    assert correlated.approved and independent.approved
+    assert correlated.decision.qty < independent.decision.qty
+
+
+def test_a_hedging_trade_is_not_charged_to_the_cluster(policy):
+    """Selling into a book of correlated longs reduces net exposure."""
+    book = _exposure(*[(f"C{i}", 100, 100.0, 90.0) for i in range(4)])
+    bars = {f"C{i}": _corr_series(_WAVE) for i in range(4)}
+    bars["TEST"] = _corr_series(_WAVE)
+    brief = make_brief(exposure=book, peer_bars=bars, closes=rising_closes())
+
+    # SELL into overbought RSI is the contrarian case, allowed at HIGH confidence.
+    result = review(sell(qty=50, confidence="HIGH"), brief, policy)
+    assert result.approved
+    assert not any("correlation cluster cap" in a for a in result.adjustments)
+
+
+def test_a_position_with_no_history_is_treated_as_correlated(policy):
+    """Cannot prove independence, so do not assume it."""
+    book = _exposure(*[(f"M{i}", 100, 100.0, 90.0) for i in range(4)])
+    result = review(buy(qty=10), make_brief(exposure=book, peer_bars={}), policy)
+    assert not result.approved
+    assert any("cluster cap" in v for v in result.vetoes)
+
+
+def test_a_static_group_can_force_the_cluster(policy):
+    """Uncorrelated on price, but declared the same bet by configuration."""
+    from research_agent.research import build_brief
+    from research_agent.market_data import FixtureMarketData
+    from tests.conftest import BASE, make_bars, flat_closes, uncorrelated_bars, et
+    from research_agent.broker import Account
+
+    book = _exposure(*[(f"G{i}", 100, 100.0, 90.0) for i in range(4)])
+    bars = uncorrelated_bars(["TEST", *[f"G{i}" for i in range(4)]])
+    groups = {"TEST": "theme", **{f"G{i}": "theme" for i in range(4)}}
+
+    brief = build_brief(
+        "TEST",
+        provider=FixtureMarketData(make_bars(flat_closes())),
+        policy=policy,
+        account=Account("PA", 100_000, 200_000, 100_000, 100_000, False, False),
+        position=None,
+        clock=None,
+        exposure=book,
+        peer_bars=bars,
+        static_groups=groups,
+        now=et(2026, 3, 2, 10, 30),
+    )
+    result = review(buy(qty=10), brief, policy)
+    assert not result.approved
+    assert any("cluster cap" in v for v in result.vetoes)
+
+
+def test_the_brief_lists_the_clusters(policy):
+    book = _exposure(("C0", 100, 100.0, 90.0), ("C1", 100, 100.0, 90.0))
+    bars = {"C0": _corr_series(_WAVE), "C1": _corr_series(_WAVE),
+            "TEST": _corr_series(_WAVE)}
+    brief = make_brief(exposure=book, peer_bars=bars)
+    block = brief.to_prompt_block(policy)
+    assert "CORRELATION CLUSTERS" in block
+    assert "C0+C1" in block or "C1+C0" in block

@@ -43,6 +43,22 @@ def falling_closes(n: int = 60, start: float = 200.0, step: float = 1.0) -> list
     return [start - i * step for i in range(n)]
 
 
+def uncorrelated_bars(symbols: Sequence[str], n: int = 90) -> dict[str, list[Bar]]:
+    """Deterministic pseudo-random return series, mutually near-uncorrelated.
+
+    Lets a test exercise one risk cap without the correlation cap firing.
+    """
+    out: dict[str, list[Bar]] = {}
+    for k, symbol in enumerate(symbols):
+        state = 1_234_567 + k * 7_919
+        closes = [100.0]
+        for _ in range(n):
+            state = (1_103_515_245 * state + 12_345) % (2 ** 31)
+            closes.append(closes[-1] * (1 + (state / 2 ** 31 - 0.5) * 0.03))
+        out[symbol.upper()] = make_bars(closes)
+    return out
+
+
 @pytest.fixture
 def policy() -> RiskPolicy:
     return RiskPolicy()
@@ -75,6 +91,7 @@ def make_brief(
     market_open: Optional[bool] = True,
     quote_age_seconds: float = 1.0,
     exposure: Optional[PortfolioExposure] = None,
+    peer_bars: Optional[dict] = None,
     symbol: str = "TEST",
 ) -> ResearchBrief:
     policy = policy or RiskPolicy()
@@ -108,5 +125,6 @@ def make_brief(
         position=position,
         clock=clock,
         exposure=exposure,
+        peer_bars=peer_bars,
         now=now,
     )

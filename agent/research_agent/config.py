@@ -43,6 +43,10 @@ class RiskPolicy:
 
     max_risk_pct: float = 0.02
     max_portfolio_risk_pct: float = 0.06
+    max_cluster_risk_pct: float = 0.04
+    correlation_threshold: float = 0.7
+    correlation_lookback: int = 60
+    correlation_min_observations: int = 20
     max_position_pct: float = 0.25
     stop_atr_mult: float = 1.5
     take_profit_r: float = 2.0
@@ -74,6 +78,23 @@ class RiskPolicy:
                 f"below max_risk_pct ({self.max_risk_pct:.2%}), which would make "
                 "even a single full-size trade impossible"
             )
+        if not self.max_risk_pct <= self.max_cluster_risk_pct <= self.max_portfolio_risk_pct:
+            raise ConfigError(
+                f"require max_risk_pct ({self.max_risk_pct:.2%}) <= "
+                f"max_cluster_risk_pct ({self.max_cluster_risk_pct:.2%}) <= "
+                f"max_portfolio_risk_pct ({self.max_portfolio_risk_pct:.2%})"
+            )
+        if not 0 < self.correlation_threshold <= 1:
+            raise ConfigError("correlation_threshold must be in (0, 1]")
+        if self.correlation_lookback < 5 or self.correlation_min_observations < 2:
+            raise ConfigError(
+                "correlation_lookback must be >= 5 and "
+                "correlation_min_observations >= 2"
+            )
+        if self.correlation_min_observations > self.correlation_lookback:
+            raise ConfigError(
+                "correlation_min_observations cannot exceed correlation_lookback"
+            )
         if not 0 < self.max_position_pct <= 1:
             raise ConfigError("max_position_pct must be in (0, 1]")
         if self.stop_atr_mult <= 0:
@@ -92,6 +113,10 @@ class RiskPolicy:
         return cls(
             max_risk_pct=_env_float("MAX_RISK_PCT", 0.02),
             max_portfolio_risk_pct=_env_float("MAX_PORTFOLIO_RISK_PCT", 0.06),
+            max_cluster_risk_pct=_env_float("MAX_CLUSTER_RISK_PCT", 0.04),
+            correlation_threshold=_env_float("CORRELATION_THRESHOLD", 0.7),
+            correlation_lookback=_env_int("CORRELATION_LOOKBACK", 60),
+            correlation_min_observations=_env_int("CORRELATION_MIN_OBSERVATIONS", 20),
             max_position_pct=_env_float("MAX_POSITION_PCT", 0.25),
             stop_atr_mult=_env_float("STOP_ATR_MULT", 1.5),
             take_profit_r=_env_float("TAKE_PROFIT_R", 2.0),

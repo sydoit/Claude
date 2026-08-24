@@ -43,6 +43,13 @@ anything is submitted, using these definitions:
   headroom is left; a position with no working stop counts its full notional.
   Your trade is sized into the headroom that remains, so when the book is
   already loaded the honest answer is often NO_TRADE.
+- **Correlated positions share a budget.** Open positions that move together
+  are charged against one cluster cap of {policy.max_cluster_risk_pct:.2%},
+  because six positions in the same theme are closer to one bet than to six.
+  Correlation is measured on returns over {policy.correlation_lookback} sessions
+  and adjusted for direction, so a hedge does not count against you and a pair
+  that cannot be measured is assumed to be correlated. The brief lists the
+  clusters already open.
 - **RSI extremes** are RSI({policy.rsi_period}) >= {policy.rsi_overbought:g} or
   <= {policy.rsi_oversold:g}. Inside an extreme, only a *contrarian* trade is
   permitted — SELL into overbought, BUY into oversold — and only at HIGH

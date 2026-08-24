@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .config import RiskPolicy
+from .portfolio import candidate_cluster
 from .research import ResearchBrief
 from .schema import CONFIDENCE_RANK, TradeDecision, no_trade
 from .sizing import SizingError, SizingPlan, plan_size
@@ -189,6 +190,31 @@ def review(
                         f"{policy.max_portfolio_risk_pct:.2%} cap); "
                         f"{headroom:,.2f} of risk budget left"
                     )
+
+            # Rule: correlated positions share a budget. Six semiconductor
+            # longs are closer to one bet than to six, so they are charged
+            # against a single cluster cap rather than counted separately.
+            if brief.exposure is not None:
+                cluster = candidate_cluster(
+                    expected,
+                    1 if proposed.decision == "BUY" else -1,
+                    brief.exposure,
+                    brief.peer_bars,
+                    policy,
+                    brief.static_groups,
+                )
+                if cluster.members:
+                    cluster_room = cluster.headroom(policy)
+                    by_cluster = math.floor(cluster_room / plan.stop_distance)
+                    if by_cluster < allowed:
+                        allowed = by_cluster
+                        binding = "correlation cluster cap"
+                        adjustments.append(
+                            f"correlated with {cluster.label_summary()}: "
+                            f"{cluster.committed_risk:,.2f} already at risk in "
+                            f"that cluster, {cluster_room:,.2f} of the "
+                            f"{cluster.budget(policy):,.2f} cluster budget left"
+                        )
 
             # Adding to an existing position in the same direction consumes the
             # same concentration budget, so net it off before sizing the clip.
