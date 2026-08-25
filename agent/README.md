@@ -588,6 +588,10 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
+Python 3.9 or newer (developed and tested on 3.11). Deprecation warnings are
+shown but do not fail the run — pass `-W error::DeprecationWarning` in CI, where
+the environment is pinned, if you want them fatal.
+
 316 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
