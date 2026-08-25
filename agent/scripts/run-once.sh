@@ -18,6 +18,9 @@ SYMBOLS="${SYMBOLS:-NVDA}"
 PYTHON="${PYTHON:-python3}"
 LOG_DIR="${LOG_DIR:-$AGENT_DIR/logs}"
 LOG_KEEP_DAYS="${LOG_KEEP_DAYS:-90}"
+# Most model calls one pass may spend. The scan screens the watchlist first,
+# so a larger list costs nothing extra when nothing on it is actionable.
+BUDGET="${BUDGET:-5}"
 
 mkdir -p "$LOG_DIR"
 DAY="$(TZ=America/New_York date +%F)"
@@ -48,19 +51,15 @@ fi
 
 # A decision object looks the same whether or not it was acted on, so the mode
 # has to be recorded here or the audit trail cannot tell you which it was.
-echo "$(date -Is) === pass start [$MODE] symbols: $SYMBOLS ===" >> "$DIARY"
+echo "$(date -Is) === pass start [$MODE] symbols: $SYMBOLS (budget $BUDGET) ===" >> "$DIARY"
 
-status=0
-for symbol in $SYMBOLS; do
-    echo "$(date -Is) --- $symbol ---" >> "$DIARY"
-    "$PYTHON" -m research_agent "$symbol" --compact --journal "$JOURNAL" \
-        "${EXECUTE_FLAG[@]}" \
-        >> "$DECISIONS" 2>> "$DIARY"
-    rc=$?
-    # 0 = decided (trade or no-trade). Anything else is worth noticing, but one
-    # bad symbol must not stop the rest of the watchlist.
-    [ $rc -ne 0 ] && { echo "$(date -Is) $symbol exited $rc" >> "$DIARY"; status=$rc; }
-done
+# One process for the whole watchlist: the account, positions, orders and clock
+# are fetched once rather than once per symbol.
+"$PYTHON" -m research_agent.scan $SYMBOLS --compact --budget "$BUDGET" \
+    --journal "$JOURNAL" "${EXECUTE_FLAG[@]}" \
+    >> "$DECISIONS" 2>> "$DIARY"
+status=$?
+[ $status -ne 0 ] && echo "$(date -Is) scan exited $status" >> "$DIARY"
 
 find "$LOG_DIR" -name '*.log' -o -name '*.jsonl' -type f -mtime "+$LOG_KEEP_DAYS" -delete 2>/dev/null
 exit $status

@@ -385,6 +385,66 @@ is 27 calls per symbol per day. **Off-hours firings are free**: when the clock
 says the market is shut, the agent emits its NO_TRADE without calling the model
 at all, so holidays, half-days and a stray weekend tick cost nothing.
 
+## Scanning a watchlist
+
+Adding symbols to the single-symbol command multiplies the expensive part: one
+model call per symbol per tick, sequentially, plus a fresh account fetch each
+time. At fifty symbols that is over 1,300 calls a day and a pass that runs
+longer than the interval it fires on.
+
+`research_agent.scan` handles a whole watchlist in one pass instead:
+
+```bash
+python -m research_agent.scan NVDA AAPL MSFT
+python -m research_agent.scan --watchlist watchlist.txt --budget 5
+python -m research_agent.scan --watchlist watchlist.txt --execute
+```
+
+Three things make a longer list affordable:
+
+**Shared account state.** The account, positions, open orders and clock are
+fetched once for the pass rather than once per symbol.
+
+**A deterministic pre-screen.** Most of the risk layer does not need the model.
+When the kill-switch is tripped, the book has no headroom, or the caps size the
+position to zero shares, *no* answer the model could give would be executed — so
+the call is skipped outright. This is exact rather than a guess, and it means a
+watchlist costs nothing on the days it cannot act. A symbol you hold is never
+skipped, because an exit is always permitted.
+
+**A budget.** What survives the screen is ranked by how unusual its movement is,
+measured in ATRs rather than percent so a volatile name is not permanently more
+interesting than a quiet one, and `--budget` spends the calls on the top of that
+queue. The rest are reported as skipped, not silently dropped.
+
+That ranking is a heuristic for allocating attention, and nothing more. It
+decides which symbols get asked about, never what the answer is — every symbol
+that reaches the model still goes through the full guardrails.
+
+### The watchlist file
+
+```
+# One symbol per line. Blank lines and # comments ignored.
+# Commas and spaces work, so a pasted list needs no reformatting.
+NVDA
+AAPL, MSFT
+```
+
+`watchlist.example.txt` is a starting point. Worth remembering when you fill it
+in: the 4% cluster cap treats symbols that move together as close to one
+position, so a watchlist of megacap tech will size like a single bet no matter
+how many tickers are on it. That is the cap working, not a bug — but it means
+breadth comes from picking different *drivers*, not more names.
+
+Both schedulers use the scan, with the budget configurable:
+
+```bash
+SYMBOLS="NVDA AAPL MSFT" BUDGET=3 scripts/run-once.sh
+```
+```powershell
+.\scripts\Run-Once.ps1 -Symbols NVDA,AAPL,MSFT -Budget 3
+```
+
 ### Watching it live
 
 Tailing a log tells you what already happened. The status panel answers where
@@ -657,7 +717,7 @@ Python 3.9 or newer (developed and tested on 3.11). Deprecation warnings are
 shown but do not fail the run — pass `-W error::DeprecationWarning` in CI, where
 the environment is pinned, if you want them fatal.
 
-359 tests, no network and no API key required. The suite is mostly about the
+380 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -680,7 +740,9 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/guardrails.py` | Re-checks every rule; vetoes or clamps |
 | `research_agent/broker.py` | Account, clock, orders, and the paper-endpoint guard |
 | `research_agent/execution.py` | Reconciles the decision with the open position |
-| `research_agent/cli.py` | Entry point |
+| `research_agent/cli.py` | Single-symbol entry point |
+| `research_agent/scan.py` | Watchlist entry point: one pass, shared state |
+| `research_agent/screen.py` | Decides which symbols are worth a model call |
 | `research_agent/doctor.py` | Preflight check: what is missing and how to fix it |
 | `research_agent/watch.py` | Live read-only status panel |
 | `research_agent/review.py` | Reads scheduled runs back so a dry run can be judged |

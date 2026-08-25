@@ -21,7 +21,10 @@ param(
     [switch]   $Execute,
     [string]   $Python = 'py',
     [string]   $LogDir,
-    [int]      $LogKeepDays = 90
+    [int]      $LogKeepDays = 90,
+    # Most model calls one pass may spend. The scan screens the watchlist
+    # first, so a longer list costs nothing when nothing on it is actionable.
+    [int]      $Budget = 5
 )
 
 $ErrorActionPreference = 'Stop'
@@ -73,21 +76,18 @@ try {
 
 try {
     $mode = if ($Execute) { 'EXECUTING' } else { 'DRY RUN' }
-    Write-Diary "=== pass start [$mode] symbols: $($Symbols -join ' ') ==="
+    Write-Diary "=== pass start [$mode] symbols: $($Symbols -join ' ') (budget $Budget) ==="
 
-    $status = 0
-    foreach ($symbol in $Symbols) {
-        Write-Diary "--- $symbol ---"
-        $agentArgs = @('-m', 'research_agent', $symbol, '--compact', '--journal', $journal)
-        if ($Execute) { $agentArgs += '--execute' }
+    # One process for the whole watchlist: the account, positions, orders and
+    # clock are fetched once rather than once per symbol.
+    $agentArgs = @('-m', 'research_agent.scan') + $Symbols +
+        @('--compact', '--budget', $Budget, '--journal', $journal)
+    if ($Execute) { $agentArgs += '--execute' }
 
-        # stdout is the decision object; stderr is the reasoning.
-        & $Python @agentArgs 2>> $diary | Add-Content -Path $decisions
-        if ($LASTEXITCODE -ne 0) {
-            Write-Diary "$symbol exited $LASTEXITCODE"
-            $status = $LASTEXITCODE   # one bad symbol must not stop the watchlist
-        }
-    }
+    # stdout is the decision objects; stderr is the reasoning.
+    & $Python @agentArgs 2>> $diary | Add-Content -Path $decisions
+    $status = $LASTEXITCODE
+    if ($status -ne 0) { Write-Diary "scan exited $status" }
 
     Get-ChildItem -Path $LogDir -Include '*.log', '*.jsonl' -File -Recurse |
         Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$LogKeepDays) } |
