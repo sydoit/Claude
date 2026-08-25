@@ -85,8 +85,20 @@ try {
     if ($Execute) { $agentArgs += '--execute' }
 
     # stdout is the decision objects; stderr is the reasoning.
-    & $Python @agentArgs 2>> $diary | Add-Content -Path $decisions
-    $status = $LASTEXITCODE
+    #
+    # Windows PowerShell 5.1 turns any native stderr write into a terminating
+    # NativeCommandError while ErrorActionPreference is Stop. This agent reports
+    # its progress on stderr by design, so that would abort the pass on the very
+    # first line. Exit code decides success here, not the presence of stderr.
+    # (PowerShell 7 dropped the behaviour, which is why it only bites on 5.1.)
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Python @agentArgs 2>> $diary | Add-Content -Path $decisions
+        $status = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
     if ($status -ne 0) { Write-Diary "scan exited $status" }
 
     Get-ChildItem -Path $LogDir -Include '*.log', '*.jsonl' -File -Recurse |

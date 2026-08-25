@@ -362,8 +362,14 @@ Unregister-ScheduledTask -TaskName MarketResearchAgent
 ```
 
 The runner behaves the same as the shell version: an exclusive file handle
-serves as the lock, logs land in `logs/`, and one failing symbol does not stop
-the watchlist.
+serves as the lock, and logs land in `logs/`.
+
+One Windows PowerShell 5.1 detail the runner handles for you: 5.1 turns any
+native stderr write into a terminating `NativeCommandError` while
+`$ErrorActionPreference` is `Stop`, and this agent reports its progress on
+stderr by design. The runner scopes that preference around the call so the exit
+code decides success, not the mere presence of stderr. PowerShell 7 dropped the
+behaviour, so it only ever bit on 5.1.
 
 ### systemd
 
