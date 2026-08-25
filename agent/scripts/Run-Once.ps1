@@ -48,9 +48,23 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $et = [System.TimeZoneInfo]::FindSystemTimeZoneById('Eastern Standard Time')
 $day = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $et).ToString('yyyy-MM-dd')
 
+# Windows would otherwise encode redirected output in the locale codepage,
+# and a single curly quote in a broker message would crash the pass.
+$env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONUTF8 = '1'
+
 $decisions = Join-Path $LogDir "decisions-$day.jsonl"
 $journal   = Join-Path $LogDir "journal-$day.jsonl"
 $diary     = Join-Path $LogDir "agent-$day.log"
+
+function Add-RawText([string] $Source, [string] $Target) {
+    if (-not (Test-Path $Source)) { return }
+    $text = [System.IO.File]::ReadAllText($Source, [System.Text.Encoding]::UTF8)
+    if ($text.Length -eq 0) { return }
+    # UTF8Encoding($false) = no byte-order mark. Add-Content on 5.1 would write
+    # one, and a BOM at the head of a .jsonl breaks strict parsers.
+    [System.IO.File]::AppendAllText($Target, $text, (New-Object System.Text.UTF8Encoding($false)))
+}
 
 function Write-Diary([string] $Message) {
     "$([DateTime]::UtcNow.ToString('o')) $Message" | Add-Content -Path $diary
@@ -86,18 +100,29 @@ try {
 
     # stdout is the decision objects; stderr is the reasoning.
     #
+    # These are captured by the operating system rather than by PowerShell.
     # Windows PowerShell 5.1 turns any native stderr write into a terminating
-    # NativeCommandError while ErrorActionPreference is Stop. This agent reports
-    # its progress on stderr by design, so that would abort the pass on the very
-    # first line. Exit code decides success here, not the presence of stderr.
-    # (PowerShell 7 dropped the behaviour, which is why it only bites on 5.1.)
-    $previousEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
+    # NativeCommandError while ErrorActionPreference is Stop, and this agent
+    # reports its progress on stderr by design. Redirecting through
+    # Start-Process means PowerShell never sees either stream, so the exit code
+    # decides success and no version-specific behaviour can intervene.
+    $tmpOut = [System.IO.Path]::GetTempFileName()
+    $tmpErr = [System.IO.Path]::GetTempFileName()
     try {
-        & $Python @agentArgs 2>> $diary | Add-Content -Path $decisions
-        $status = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousEap
+        # Quote only what needs it, so a path containing spaces survives.
+        $quoted = $agentArgs | ForEach-Object {
+            if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { "$_" }
+        }
+        $proc = Start-Process -FilePath $Python -ArgumentList $quoted `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+        $status = $proc.ExitCode
+
+        Add-RawText -Source $tmpOut -Target $decisions
+        Add-RawText -Source $tmpErr -Target $diary
+    }
+    finally {
+        Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
     }
     if ($status -ne 0) { Write-Diary "scan exited $status" }
 
