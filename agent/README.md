@@ -362,8 +362,21 @@ Unregister-ScheduledTask -TaskName MarketResearchAgent
 ```
 
 The runner behaves the same as the shell version: an exclusive file handle
-serves as the lock, logs land in `logs/`, and one failing symbol does not stop
-the watchlist.
+serves as the lock, and logs land in `logs/`.
+
+Two Windows details the runner handles for you.
+
+Windows PowerShell 5.1 turns any native stderr write into a terminating
+`NativeCommandError` while `$ErrorActionPreference` is `Stop`, and this agent
+reports its progress on stderr by design. The runner captures both streams
+through `Start-Process`, so the operating system does the redirecting and
+PowerShell never sees them — the exit code decides success, and no
+version-specific behaviour can intervene.
+
+Python on Windows also encodes redirected output in the locale codepage, so a
+single curly quote in a broker message would otherwise crash a pass with
+`UnicodeEncodeError`. The runner sets `PYTHONUTF8` and appends without a
+byte-order mark, which would break a strict reader at the head of a `.jsonl`.
 
 ### systemd
 
