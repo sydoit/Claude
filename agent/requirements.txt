@@ -1,0 +1,5 @@
+anthropic>=1.0.0
+pydantic>=2.6
+requests>=2.31
+# Windows has no system timezone database; zoneinfo needs this there.
+tzdata; platform_system == "Windows"

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the market research agent through the session
+
+[Timer]
+# Every 15 minutes, 09:30-16:00 Eastern, weekdays.
+OnCalendar=Mon..Fri 09,10,11,12,13,14,15:00/15 America/New_York
+OnCalendar=Mon..Fri 16:00 America/New_York
+# A machine asleep at the tick runs once on wake rather than silently skipping.
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

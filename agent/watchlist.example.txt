@@ -1,0 +1,14 @@
+# One symbol per line. Blank lines and # comments are ignored.
+# Commas and spaces work too, so a pasted list needs no reformatting.
+
+# Megacap tech - note these move together, so the 4% cluster cap will
+# treat them as close to one position rather than several.
+NVDA
+AAPL
+MSFT
+AMZN
+
+# Something with a different driver, so the book is not one bet.
+XOM
+JPM
+UNH
