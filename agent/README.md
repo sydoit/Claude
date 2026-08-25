@@ -204,6 +204,26 @@ pip install -r requirements.txt
 cp .env.example .env      # then fill in the keys
 ```
 
+<details>
+<summary><b>Windows (PowerShell)</b></summary>
+
+```powershell
+cd agent
+py -m pip install -r requirements.txt
+Copy-Item .env.example .env      # then fill in the keys
+```
+
+Use the `py` launcher rather than `pip` or `python`: it is installed with
+Python on Windows and works even when nothing was added to `PATH`. If
+`py --version` fails, Python is not installed — `winget install Python.Python.3.12`,
+then reopen PowerShell.
+
+Windows has no system timezone database, and this agent cannot tell whether the
+market is open without one. `requirements.txt` therefore pulls in `tzdata` on
+Windows; if you install dependencies some other way, add it yourself or every
+import will fail.
+</details>
+
 You need two sets of credentials:
 
 * **Anthropic** — `ANTHROPIC_API_KEY`, for the reasoning step.
@@ -283,6 +303,40 @@ CRON_TZ=America/New_York
 machine and survives daylight saving. It works on Vixie cron (Debian, Ubuntu)
 and cronie (RHEL, Fedora); if yours lacks it, convert the hours to UTC by hand
 and revisit them twice a year.
+
+### Windows Task Scheduler
+
+`run-once.sh` is a shell script, so Windows uses the PowerShell pair instead:
+
+```powershell
+# One pass, dry.
+.\scripts\Run-Once.ps1 -Symbols NVDA,AAPL
+
+# The same pass, placing orders.
+.\scripts\Run-Once.ps1 -Symbols NVDA,AAPL -Execute
+```
+
+`Register-Schedule.ps1` registers it with Task Scheduler for every 15 minutes
+through the session, weekdays. Run it from an **elevated** PowerShell:
+
+```powershell
+.\scripts\Register-Schedule.ps1 -Symbols NVDA,AAPL          # dry run schedule
+.\scripts\Register-Schedule.ps1 -Symbols NVDA,AAPL -Execute # once you trust it
+```
+
+It converts 09:30–16:00 Eastern into this machine's local time and prints the
+window it registered — check that line rather than assuming. Re-run it after a
+machine timezone change, since the trigger is stored in local time.
+
+```powershell
+Get-ScheduledTask -TaskName MarketResearchAgent     # inspect
+Start-ScheduledTask -TaskName MarketResearchAgent   # run one pass now
+Unregister-ScheduledTask -TaskName MarketResearchAgent
+```
+
+The runner behaves the same as the shell version: an exclusive file handle
+serves as the lock, logs land in `logs/`, and one failing symbol does not stop
+the watchlist.
 
 ### systemd
 
@@ -441,6 +495,7 @@ nothing recorded to replay.
   invoke the script rather than `python -m research_agent` from a scheduler.
 * **cron's environment is nearly empty.** No `PATH` to speak of, no shell
   profile, no virtualenv. Set `PYTHON=/path/to/venv/bin/python` if you use one.
+  On Windows pass `-Python` to `Run-Once.ps1` for the same reason.
 * **Nothing supervises the market between ticks.** A 15-minute cadence means a
   position can move a long way unobserved. The bracket stop is what protects
   you between runs, not the schedule.
@@ -564,6 +619,8 @@ including that the stop is attached and that the live endpoint is refused.
 | `scripts/run-once.sh` | One scheduled pass over a watchlist, with locking and logs |
 | `scripts/crontab.example` | Ready-to-edit cron schedule |
 | `scripts/research-agent.{service,timer}` | systemd equivalents |
+| `scripts/Run-Once.ps1` | The Windows runner |
+| `scripts/Register-Schedule.ps1` | Registers the Windows scheduled task |
 
 ## Before you point this at anything
 

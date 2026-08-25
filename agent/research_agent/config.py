@@ -5,9 +5,28 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from datetime import time
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-MARKET_TZ = ZoneInfo("America/New_York")
+
+def _market_tz() -> ZoneInfo:
+    """The exchange timezone.
+
+    Linux and macOS ship a system tz database; Windows does not, so there the
+    `tzdata` package supplies it. Without a timezone this agent cannot tell
+    whether the market is open, so failing clearly beats failing obscurely.
+    """
+    try:
+        return ZoneInfo("America/New_York")
+    except ZoneInfoNotFoundError as exc:  # pragma: no cover - platform specific
+        raise RuntimeError(
+            "No timezone database found, so market hours cannot be determined. "
+            "On Windows this is expected: install the tzdata package with\n"
+            "    py -m pip install tzdata\n"
+            "(it is already listed in requirements.txt for Windows)."
+        ) from exc
+
+
+MARKET_TZ = _market_tz()
 
 PAPER_HOSTS = ("paper-api.alpaca.markets",)
 
