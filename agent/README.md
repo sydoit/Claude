@@ -231,6 +231,23 @@ You need two sets of credentials:
   [app.alpaca.markets](https://app.alpaca.markets/). Paper keys are what you
   want; the default `ALPACA_TRADING_BASE_URL` is the paper endpoint.
 
+## Check it first
+
+```bash
+python -m research_agent.doctor        # or: py -m research_agent.doctor
+```
+
+One command that answers "is this set up, and if not what exactly is missing":
+Python and dependencies, the timezone database, which credentials are present
+(never their values), the risk policy, whether Alpaca answers and is a paper
+endpoint, whether market data flows, the session clock, the kill-switch, and
+what the logs contain. Everything it flags comes with the command that fixes it.
+
+Add `--probe` to spend one small Claude call proving the key works — the only
+check that costs anything. Exit status is non-zero when something blocks.
+
+Run this whenever the answer to "is it doing anything?" is not obvious.
+
 ## Run it
 
 Dry run — researches, decides, sizes, and tells you what it *would* send:
@@ -640,7 +657,7 @@ Python 3.9 or newer (developed and tested on 3.11). Deprecation warnings are
 shown but do not fail the run — pass `-W error::DeprecationWarning` in CI, where
 the environment is pinned, if you want them fatal.
 
-339 tests, no network and no API key required. The suite is mostly about the
+359 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -664,6 +681,7 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/broker.py` | Account, clock, orders, and the paper-endpoint guard |
 | `research_agent/execution.py` | Reconciles the decision with the open position |
 | `research_agent/cli.py` | Entry point |
+| `research_agent/doctor.py` | Preflight check: what is missing and how to fix it |
 | `research_agent/watch.py` | Live read-only status panel |
 | `research_agent/review.py` | Reads scheduled runs back so a dry run can be judged |
 | `research_agent/journal.py` | Records the entry, stop and target a decision was built on |
