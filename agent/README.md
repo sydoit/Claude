@@ -324,9 +324,19 @@ through the session, weekdays. Run it from an **elevated** PowerShell:
 .\scripts\Register-Schedule.ps1 -Symbols NVDA,AAPL -Execute # once you trust it
 ```
 
-It converts 09:30–16:00 Eastern into this machine's local time and prints the
-window it registered — check that line rather than assuming. Re-run it after a
-machine timezone change, since the trigger is stored in local time.
+It prints the local-time window it registered — check that line rather than
+assuming.
+
+Task Scheduler stores triggers in **local** time, but the session to track is
+Eastern, and the US and UK/EU change clocks on different dates. For about a week
+twice a year the offset shifts, so a fixed local trigger fires an hour off and
+misses the open. Rather than pretend otherwise, the window is padded an hour
+either side and the agent's own Eastern clock decides what runs. Ticks outside
+the session cost nothing — the model is never called when the market is shut.
+
+By default the task uses an S4U principal, so it runs whether or not you are
+logged on and stores no password. `-OnlyWhenLoggedOn` keeps the interactive
+behaviour if your policy forbids S4U.
 
 ```powershell
 Get-ScheduledTask -TaskName MarketResearchAgent     # inspect
