@@ -358,6 +358,44 @@ is 27 calls per symbol per day. **Off-hours firings are free**: when the clock
 says the market is shut, the agent emits its NO_TRADE without calling the model
 at all, so holidays, half-days and a stray weekend tick cost nothing.
 
+### Watching it live
+
+Tailing a log tells you what already happened. The status panel answers where
+the account stands right now:
+
+```bash
+python -m research_agent.watch              # refreshes every 15s
+python -m research_agent.watch --logs-only  # no broker, no keys needed
+python -m research_agent.watch --once       # one frame, for a pipe
+```
+
+```
+Market Research Agent - live            2026-08-25 12:50:03 ET   market open
+------------------------------------------------------------------------------
+  ACCOUNT      equity 100,412.00    day P&L +412.00 (+0.41%)
+               buying power 200,824.00
+  KILL SWITCH  ok - 3,412.00 of the 3% daily budget left
+  RISK         open 4,656.31 (4.64% of 6% cap)   headroom 1,368.41
+               ! XYZ has no stop
+CLUSTERS ---------------------------------------------------------------------
+  NVDA+AMD                       1,656.31  1.65% of 4%
+POSITIONS --------------------------------------------------------------------
+  LONG 131 NVDA @ 190.42, stop 185.41 -> 656.31 at risk
+  LONG 50 XYZ @ 60.00 - NO STOP, full notional 3,000.00 counted as at risk
+DECISIONS TODAY (3) ----------------------------------------------------------
+  11:30  NO_TRADE   NVDA   LOW    RSI 74.3 is overbought and a BUY adds
+  11:15  BUY 131    NVDA   HIGH   Trend intact, RSI mid-range, volume ab
+```
+
+It is strictly read-only: it never decides and never trades, and it never calls
+Claude, so watching costs nothing beyond a few market-data requests. Daily bars
+are fetched once and cached, so cluster grouping is measured rather than
+assumed — and when history is missing the panel says `CLUSTERS (unmeasured)`
+rather than presenting the conservative default as a finding.
+
+On Windows, `Get-Content .\logs\agent-2026-08-25.log -Wait` tails the
+reasoning log alongside it.
+
 ### Reading a dry run
 
 Run the schedule with `EXECUTE=1` omitted for a few days, then read it back:
@@ -592,7 +630,7 @@ Python 3.9 or newer (developed and tested on 3.11). Deprecation warnings are
 shown but do not fail the run — pass `-W error::DeprecationWarning` in CI, where
 the environment is pinned, if you want them fatal.
 
-316 tests, no network and no API key required. The suite is mostly about the
+339 tests, no network and no API key required. The suite is mostly about the
 rules rather than the plumbing: the 2% cap is swept across 60 combinations of
 price, volatility and portfolio size; every guardrail has a test proving it
 vetoes; and the execution tests assert on the exact JSON body sent to Alpaca,
@@ -616,6 +654,7 @@ including that the stop is attached and that the live endpoint is refused.
 | `research_agent/broker.py` | Account, clock, orders, and the paper-endpoint guard |
 | `research_agent/execution.py` | Reconciles the decision with the open position |
 | `research_agent/cli.py` | Entry point |
+| `research_agent/watch.py` | Live read-only status panel |
 | `research_agent/review.py` | Reads scheduled runs back so a dry run can be judged |
 | `research_agent/journal.py` | Records the entry, stop and target a decision was built on |
 | `research_agent/scoring.py` | Replays decisions against the bars that followed |

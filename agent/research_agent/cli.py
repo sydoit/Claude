@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import time
 import sys
 from pathlib import Path
 from typing import Optional
@@ -236,10 +237,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"[error] {exc}", file=sys.stderr)
         return 1
 
-    print(f"[research] {brief.session.detail}", file=sys.stderr)
+    print(f"[research] {brief.session.detail}", file=sys.stderr, flush=True)
     if brief.drawdown is not None:
         marker = "HALTED" if brief.drawdown.halts_entries else "ok"
-        print(f"[kill-switch] {marker}: {brief.drawdown.describe()}", file=sys.stderr)
+        print(f"[kill-switch] {marker}: {brief.drawdown.describe()}", file=sys.stderr, flush=True)
     if brief.exposure is not None and brief.exposure.positions:
         print(
             f"[research] portfolio risk {brief.exposure.total_risk:,.2f} "
@@ -280,14 +281,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("[model] skipped: market closed, no call made", file=sys.stderr)
         return 0
 
+    print(
+        f"[model] asking {settings.model} (effort {settings.effort}) - "
+        "this usually takes 20-60s...",
+        file=sys.stderr, flush=True,
+    )
+    started = time.monotonic()
     outcome = propose_decision(brief, settings)
+    elapsed = time.monotonic() - started
     if outcome.failed:
         print(f"[model] {outcome.error}", file=sys.stderr)
     else:
         print(
             f"[model] proposed {outcome.decision.decision} "
-            f"qty={outcome.decision.qty} confidence={outcome.decision.confidence}",
-            file=sys.stderr,
+            f"qty={outcome.decision.qty} confidence={outcome.decision.confidence} "
+            f"in {elapsed:.1f}s",
+            file=sys.stderr, flush=True,
         )
 
     result = review(
